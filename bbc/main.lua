@@ -1,6 +1,12 @@
 -- 主入口
 -- yueqiumao (u2nn@qq.com)
 
+PROJECT = "BBC"
+VERSION = "1.0.0"
+PRODUCT_KEY = "v32xEAKsGTIEQxtqgwCldp5aPlcnPs3K"
+
+require "sys"
+
 require "class"
 require "logger"
 require "event"
@@ -15,12 +21,16 @@ local model = "com.ball.car" -- 设备类型
 
 function main()
     local app = Application.new()
-    
+
     app:pre_setup({
         did=did,
         token=token,
         model=model
     })
+
+    local logger = Logger.new()
+    logger.pre_setup()
+    app:register_component(logger)
 
     app:setup()
 
@@ -29,4 +39,6 @@ function main()
     end
 end
 
-main()
+function _main()
+    sys.init(0)
+end
