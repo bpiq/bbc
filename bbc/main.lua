@@ -8,9 +8,9 @@ PRODUCT_KEY = "v32xEAKsGTIEQxtqgwCldp5aPlcnPs3K"
 require "sys"
 
 require "class"
+require "component"
 require "logger"
 require "event"
-require "component"
 require "util"
 require "network"
 require "application"
@@ -19,7 +19,7 @@ local did = 10001 -- 设备编号
 local token = "hellohelloballcat" -- 设备令牌
 local model = "com.ball.car" -- 设备类型
 
-function start()
+local function thread_main()
     local app = Application.new()
 
     app:pre_setup({
@@ -36,14 +36,13 @@ function start()
 
     while true do
         app:loop()
+        sys.wait(1)
     end
 end
 
-function _main()
+local function main()
     sys.init(0)
-
-    start()
-
+    sys.taskInit(thread_main)
     sys.run()
 end
-_main()
+main()

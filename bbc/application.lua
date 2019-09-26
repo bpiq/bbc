@@ -17,7 +17,7 @@ end
 
 -- 系统启用
 function Application:setup()
-    
+    logger:info("BBC v0.1 启动")
 end
 
 -- 系统主循环
@@ -31,7 +31,7 @@ end
 
 function Application:register_component(component)
     for i,v in ipairs(self.components) do
-        if (v == component) do
+        if v == component then
             return
         end
     end
