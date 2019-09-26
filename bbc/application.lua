@@ -7,6 +7,7 @@ app = nil
 
 function Application:ctor()
     app = self
+    self.components = {}
 end
 
 -- 系统预初始化
@@ -26,4 +27,13 @@ end
 
 function Application:destroy()
 
+end
+
+function Application:register_component(component)
+    for i,v in ipairs(self.components) do
+        if (v == component) do
+            return
+        end
+    end
+    table.insert(self.components, component)
 end
