@@ -1,744 +1,466 @@
+---æ¨¡å—åŠŸèƒ½ï¼šç½‘ç»œç®¡ç†ã€ä¿¡å·æŸ¥è¯¢ã€GSMç½‘ç»œçŠ¶æ€æŸ¥è¯¢ã€ç½‘ç»œæŒ‡ç¤ºç¯æ§åˆ¶ã€ä¸´è¿‘å°åŒºä¿¡æ¯æŸ¥è¯¢
+-- @module net
+-- @author openLuat
+-- @license MIT
+-- @copyright openLuat
+-- @release 2017.02.17
+
+require "sys"
+require "ril"
+require "pio"
+require "sim"
+require "log"
+module(..., package.seeall)
+
+--åŠ è½½å¸¸ç”¨çš„å…¨å±€å‡½æ•°è‡³æœ¬åœ°
+local publish = sys.publish
+
+--GSMç½‘ç»œçŠ¶æ€ï¼š
+--INITï¼šå¼€æœºåˆå§‹åŒ–ä¸­çš„çŠ¶æ€
+--REGISTEREDï¼šæ³¨å†Œä¸ŠGSMç½‘ç»œ
+--UNREGISTERï¼šæœªæ³¨å†Œä¸ŠGSMç½‘ç»œ
+local state = "INIT"
+--SIMå¡çŠ¶æ€ï¼štrueä¸ºå¼‚å¸¸ï¼Œfalseæˆ–è€…nilä¸ºæ­£å¸¸
+local simerrsta
+-- é£è¡Œæ¨¡å¼çŠ¶æ€
+flyMode = false
+
+--lacï¼šä½ç½®åŒºID
+--ciï¼šå°åŒºID
+--rssiï¼šä¿¡å·å¼ºåº¦
+local lac, ci, rssi = "", "", 0
+--cellinfoï¼šå½“å‰å°åŒºå’Œä¸´è¿‘å°åŒºä¿¡æ¯è¡¨
+--multicellcbï¼šè·å–å¤šå°åŒºçš„å›è°ƒå‡½æ•°
+local cellinfo, multicellcb = {}
+--æ³¨å†Œæ ‡å¿—å‚æ•°ï¼Œcreg3ï¼štrueä¸ºæ²¡æ³¨å†Œï¼Œä¸ºfalseä¸ºæ³¨å†ŒæˆåŠŸ
+--local creg3
 --[[
-Ä£¿éÃû³Æ£ºÍøÂç¹ÜÀí
-Ä£¿é¹¦ÄÜ£ºĞÅºÅ²éÑ¯¡¢GSMÍøÂç×´Ì¬²éÑ¯¡¢ÍøÂçÖ¸Ê¾µÆ¿ØÖÆ¡¢ÁÙ½üĞ¡ÇøĞÅÏ¢²éÑ¯
-Ä£¿é×îºóĞŞ¸ÄÊ±¼ä£º2017.02.17
+å‡½æ•°åï¼šcheckCRSM
+åŠŸèƒ½ï¼šå¦‚æœæ³¨å†Œè¢«æ‹’ç»ï¼Œè¿è¡Œæ­¤å‡½æ•°ï¼Œå…ˆåˆ¤æ–­æ˜¯å¦å–å¾—imsiå·ï¼Œå†åˆ¤æ–­æ˜¯å¦æ˜¯ä¸­å›½ç§»åŠ¨å¡
+å¦‚æœç¡®å®šæ˜¯ä¸­å›½ç§»åŠ¨å¡ï¼Œåˆ™è¿›è¡ŒSIMå¡é™åˆ¶è®¿é—®
+å‚æ•°ï¼š
+è¿”å›å€¼ï¼š
+]]
+--[[
+local function checkCRSM()
+    local imsi = sim.getImsi()
+    if imsi and imsi ~= "" then
+        if string.sub(imsi, 1, 3) == "460" then
+            local mnc = string.sub(imsi, 4, 5)
+            if (mnc == "00" or mnc == "02" or mnc == "04" or mnc == "07") and creg3 then
+                ril.request("AT+CRSM=176,28539,0,0,12")
+            end
+        end
+    else
+        sys.timerStart(checkCRSM, 5000)
+    end
+end
 ]]
 
---¶¨ÒåÄ£¿é,µ¼ÈëÒÀÀµ¿â
-local base = _G
-local string = require"string"
-local sys = require "sys"
-local ril = require "ril"
-local pio = require"pio"
-local sim = require "sim"
-module("net")
-
---¼ÓÔØ³£ÓÃµÄÈ«¾Öº¯ÊıÖÁ±¾µØ
-local dispatch = sys.dispatch
-local req = ril.request
-local smatch,ssub = string.match,string.sub
-local tonumber,tostring,print = base.tonumber,base.tostring,base.print
---GSMÍøÂç×´Ì¬£º
---INIT£º¿ª»ú³õÊ¼»¯ÖĞµÄ×´Ì¬
---REGISTERED£º×¢²áÉÏGSMÍøÂç
---UNREGISTER£ºÎ´×¢²áÉÏGSMÍøÂç
-local state = "INIT"
---SIM¿¨×´Ì¬£ºtrueÎªÒì³££¬false»òÕßnilÎªÕı³£
-local simerrsta
-
---lac£ºÎ»ÖÃÇøID
---ci£ºĞ¡ÇøID
---rssi£ºĞÅºÅÇ¿¶È
-local lac,ci,rssi = "","",0
-
---csqqrypriod£ºĞÅºÅÇ¿¶È¶¨Ê±²éÑ¯¼ä¸ô
---cengqrypriod£ºµ±Ç°ºÍÁÙ½üĞ¡ÇøĞÅÏ¢¶¨Ê±²éÑ¯¼ä¸ô
-local csqqrypriod,cengqrypriod = 60*1000
-
---cellinfo£ºµ±Ç°Ğ¡ÇøºÍÁÙ½üĞ¡ÇøĞÅÏ¢±í
---flymode£ºÊÇ·ñ´¦ÓÚ·ÉĞĞÄ£Ê½
---csqswitch£º¶¨Ê±²éÑ¯ĞÅºÅÇ¿¶È¿ª¹Ø
---cengswitch£º¶¨Ê±²éÑ¯µ±Ç°ºÍÁÙ½üĞ¡ÇøĞÅÏ¢¿ª¹Ø
---multicellcb£º»ñÈ¡¶àĞ¡ÇøµÄ»Øµ÷º¯Êı
-local cellinfo,flymode,csqswitch,cengswitch,multicellcb = {}
-
---ledstate£ºÍøÂçÖ¸Ê¾µÆ×´Ì¬INIT,FLYMODE,SIMERR,IDLE,CREG,CGATT,SCK
---INIT£º¹¦ÄÜ¹Ø±Õ×´Ì¬
---FLYMODE£º·ÉĞĞÄ£Ê½
---SIMERR£ºÎ´¼ì²âµ½SIM¿¨»òÕßSIM¿¨ËøpinÂëµÈÒì³£
---IDLE£ºÎ´×¢²áGSMÍøÂç
---CREG£ºÒÑ×¢²áGSMÍøÂç
---CGATT£ºÒÑ¸½×ÅGPRSÊı¾İÍøÂç
---SCK£ºÓÃ»§socketÒÑÁ¬½ÓÉÏºóÌ¨
---ledontime£ºÖ¸Ê¾µÆµãÁÁÊ±³¤(ºÁÃë)
---ledofftime£ºÖ¸Ê¾µÆÏ¨ÃğÊ±³¤(ºÁÃë)
---usersckconnect£ºÓÃ»§socketÊÇ·ñÁ¬½ÓÉÏºóÌ¨
---userscksslconnect£ºÓÃ»§socketÊÇ·ñÁ¬½ÓÉÏºóÌ¨
-local ledstate,ledontime,ledofftime,usersckconnect,userscksslconnect = "INIT",0,0
---ledflg£ºÍøÂçÖ¸Ê¾µÆ¿ª¹Ø
---ledpin£ºÍøÂçÖ¸Ê¾µÆ¿ØÖÆÒı½Å
---ledvalid£ºÒı½ÅÊä³öºÎÖÖµçÆ½»áµãÁÁÖ¸Ê¾µÆ£¬1Îª¸ß£¬0ÎªµÍ
---ledidleon,ledidleoff,ledcregon,ledcregoff,ledcgatton,ledcgattoff,ledsckon,ledsckoff£ºIDLE,CREG,CGATT,SCK×´Ì¬ÏÂÖ¸Ê¾µÆµÄµãÁÁºÍÏ¨ÃğÊ±³¤(ºÁÃë)
-local ledflg,ledpin,ledvalid,ledflymodeon,ledflymodeoff,ledsimerron,ledsimerroff,ledidleon,ledidleoff,ledcregon,ledcregoff,ledcgatton,ledcgattoff,ledsckon,ledsckoff = false,((base.MODULE_TYPE=="Air800" or base.MODULE_TYPE=="Air801") and pio.P0_28 or pio.P1_1),1,0,0xFFFF,300,5700,300,3700,300,1700,300,700,100,100
-
 --[[
-º¯ÊıÃû£ºcreg
-¹¦ÄÜ  £º½âÎöCREGĞÅÏ¢
-²ÎÊı  £º
-		data£ºCREGĞÅÏ¢×Ö·û´®£¬ÀıÈç+CREG: 2¡¢+CREG: 1,"18be","93e1"¡¢+CREG: 5,"18a7","cb51"
-·µ»ØÖµ£ºÎŞ
+å‡½æ•°åï¼šcreg
+åŠŸèƒ½  ï¼šè§£æCREGä¿¡æ¯
+å‚æ•°  ï¼šdataï¼šCREGä¿¡æ¯å­—ç¬¦ä¸²ï¼Œä¾‹å¦‚+CREG: 2ã€+CREG: 1,"18be","93e1"ã€+CREG: 5,"18a7","cb51"
+è¿”å›å€¼ï¼šæ— 
 ]]
 local function creg(data)
-	local p1,s
-	--»ñÈ¡×¢²á×´Ì¬
-	_,_,p1 = string.find(data,"%d,(%d)")
-	if p1 == nil then
-		_,_,p1 = string.find(data,"(%d)")
-		if p1 == nil then
-			return
-		end
-	end
-
-	--ÒÑ×¢²á
-	if p1 == "1" or p1 == "5" then
-		s = "REGISTERED"		
-	--Î´×¢²á
-	else
-		s = "UNREGISTER"
-	end
-	--×¢²á×´Ì¬·¢ÉúÁË¸Ä±ä
-	if s ~= state then
-		--ÁÙ½üĞ¡Çø²éÑ¯´¦Àí
-		if not cengqrypriod and s == "REGISTERED" then
-			setcengqueryperiod(60000)
-		else
-			cengquery()
-		end
-		state = s
-		--²úÉúÒ»¸öÄÚ²¿ÏûÏ¢NET_STATE_CHANGED£¬±íÊ¾GSMÍøÂç×¢²á×´Ì¬·¢Éú±ä»¯
-		dispatch("NET_STATE_CHANGED",s)
-		--Ö¸Ê¾µÆ¿ØÖÆ
-		procled()
-	end
-	--ÒÑ×¢²á²¢ÇÒlac»òci·¢ÉúÁË±ä»¯
-	if state == "REGISTERED" then
-		p2,p3 = string.match(data,"\"(%x+)\",\"(%x+)\"")
-		if lac ~= p2 or ci ~= p3 then
-			lac = p2
-			ci = p3
-			--²úÉúÒ»¸öÄÚ²¿ÏûÏ¢NET_CELL_CHANGED£¬±íÊ¾lac»òci·¢ÉúÁË±ä»¯
-			dispatch("NET_CELL_CHANGED")
-		end
-	end
+    local p1, s
+    --è·å–æ³¨å†ŒçŠ¶æ€
+    _, _, p1 = string.find(data, "%d,(%d)")
+    if p1 == nil then
+        _, _, p1 = string.find(data, "(%d)")
+        if p1 == nil then
+            return
+        end
+    end
+    --creg3 = false
+    --å·²æ³¨å†Œ
+    if p1 == "1" or p1 == "5" then
+        s = "REGISTERED"
+    --æœªæ³¨å†Œ
+    else
+        --[[
+        if p1 == "3" then
+            creg3 = true
+            checkCRSM()
+        end
+        ]]
+        s = "UNREGISTER"
+    end
+    --æ³¨å†ŒçŠ¶æ€å‘ç”Ÿäº†æ”¹å˜
+    if s ~= state then
+        --ä¸´è¿‘å°åŒºæŸ¥è¯¢å¤„ç†
+        if s == "REGISTERED" then
+            --äº§ç”Ÿä¸€ä¸ªå†…éƒ¨æ¶ˆæ¯NET_STATE_CHANGEDï¼Œè¡¨ç¤ºGSMç½‘ç»œæ³¨å†ŒçŠ¶æ€å‘ç”Ÿå˜åŒ–
+            publish("NET_STATE_REGISTERED")
+            cengQueryPoll()
+        end
+        state = s
+    
+    end
+    --å·²æ³¨å†Œå¹¶ä¸”lacæˆ–ciå‘ç”Ÿäº†å˜åŒ–
+    if state == "REGISTERED" then
+        p2, p3 = string.match(data, "\"(%x+)\",\"(%x+)\"")
+        if lac ~= p2 or ci ~= p3 then
+            lac = p2
+            ci = p3
+            --äº§ç”Ÿä¸€ä¸ªå†…éƒ¨æ¶ˆæ¯NET_CELL_CHANGEDï¼Œè¡¨ç¤ºlacæˆ–ciå‘ç”Ÿäº†å˜åŒ–
+            publish("NET_CELL_CHANGED")
+        end
+    end
 end
 
 --[[
-º¯ÊıÃû£ºresetcellinfo
-¹¦ÄÜ  £ºÖØÖÃµ±Ç°Ğ¡ÇøºÍÁÙ½üĞ¡ÇøĞÅÏ¢±í
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
+å‡½æ•°åï¼šresetcellinfo
+åŠŸèƒ½  ï¼šé‡ç½®å½“å‰å°åŒºå’Œä¸´è¿‘å°åŒºä¿¡æ¯è¡¨
+å‚æ•°  ï¼šæ— 
+è¿”å›å€¼ï¼šæ— 
 ]]
-local function resetcellinfo()
-	local i
-	cellinfo.cnt = 11 --×î´ó¸öÊı
-	for i=1,cellinfo.cnt do
-		cellinfo[i] = {}
-		cellinfo[i].mcc,cellinfo[i].mnc = nil
-		cellinfo[i].lac = 0
-		cellinfo[i].ci = 0
-		cellinfo[i].rssi = 0
-		cellinfo[i].ta = 0
-	end
+local function resetCellInfo()
+    local i
+    cellinfo.cnt = 11 --æœ€å¤§ä¸ªæ•°
+    for i = 1, cellinfo.cnt do
+        cellinfo[i] = {}
+        cellinfo[i].mcc, cellinfo[i].mnc = nil
+        cellinfo[i].lac = 0
+        cellinfo[i].ci = 0
+        cellinfo[i].rssi = 0
+        cellinfo[i].ta = 0
+    end
 end
 
 --[[
-º¯ÊıÃû£ºceng
-¹¦ÄÜ  £º½âÎöµ±Ç°Ğ¡ÇøºÍÁÙ½üĞ¡ÇøĞÅÏ¢
-²ÎÊı  £º
-		data£ºµ±Ç°Ğ¡ÇøºÍÁÙ½üĞ¡ÇøĞÅÏ¢×Ö·û´®£¬ÀıÈçÏÂÃæÖĞµÄÃ¿Ò»ĞĞ£º
-		+CENG:1,1
-		+CENG:0,"573,24,99,460,0,13,49234,10,0,6311,255"
-		+CENG:1,"579,16,460,0,5,49233,6311"
-		+CENG:2,"568,14,460,0,26,0,6311"
-		+CENG:3,"584,13,460,0,10,0,6213"
-		+CENG:4,"582,13,460,0,51,50146,6213"
-		+CENG:5,"11,26,460,0,3,52049,6311"
-		+CENG:6,"29,26,460,0,32,0,6311"
-·µ»ØÖµ£ºÎŞ
+å‡½æ•°åï¼šceng
+åŠŸèƒ½  ï¼šè§£æå½“å‰å°åŒºå’Œä¸´è¿‘å°åŒºä¿¡æ¯
+å‚æ•°  ï¼š
+dataï¼šå½“å‰å°åŒºå’Œä¸´è¿‘å°åŒºä¿¡æ¯å­—ç¬¦ä¸²ï¼Œä¾‹å¦‚ä¸‹é¢ä¸­çš„æ¯ä¸€è¡Œï¼š
++CENG:1,1
++CENG:0,"573,24,99,460,0,13,49234,10,0,6311,255"
++CENG:1,"579,16,460,0,5,49233,6311"
++CENG:2,"568,14,460,0,26,0,6311"
++CENG:3,"584,13,460,0,10,0,6213"
++CENG:4,"582,13,460,0,51,50146,6213"
++CENG:5,"11,26,460,0,3,52049,6311"
++CENG:6,"29,26,460,0,32,0,6311"
+è¿”å›å€¼ï¼šæ— 
 ]]
 local function ceng(data)
-	--Ö»´¦ÀíÓĞĞ§µÄCENGĞÅÏ¢
-	if string.find(data,"%+CENG:%d+,\".+\"") then
-		local id,rssi,lac,ci,ta,mcc,mnc
-		id = string.match(data,"%+CENG:(%d)")
-		id = tonumber(id)
-		--µÚÒ»ÌõCENGĞÅÏ¢ºÍÆäÓàµÄ¸ñÊ½²»Í¬
-		if id == 0 then
-			rssi,mcc,mnc,ci,lac,ta = string.match(data, "%+CENG:%d,\"%d+,(%d+),%d+,(%d+),(%d+),%d+,(%d+),%d+,%d+,(%d+),(%d+)\"")
-		else
-			rssi,mcc,mnc,ci,lac,ta = string.match(data, "%+CENG:%d,\"%d+,(%d+),(%d+),(%d+),%d+,(%d+),(%d+)\"")
-		end
-		--½âÎöÕıÈ·
-		if rssi and ci and lac and mcc and mnc then
-			--Èç¹ûÊÇµÚÒ»Ìõ£¬Çå³ıĞÅÏ¢±í
-			if id == 0 then
-				resetcellinfo()
-			end
-			--±£´æmcc¡¢mnc¡¢lac¡¢ci¡¢rssi¡¢ta
-			cellinfo[id+1].mcc = mcc
-			cellinfo[id+1].mnc = mnc
-			cellinfo[id+1].lac = tonumber(lac)
-			cellinfo[id+1].ci = tonumber(ci)
-			cellinfo[id+1].rssi = (tonumber(rssi) == 99) and 0 or tonumber(rssi)
-			cellinfo[id+1].ta = tonumber(ta or "0")
-			--²úÉúÒ»¸öÄÚ²¿ÏûÏ¢CELL_INFO_IND£¬±íÊ¾¶ÁÈ¡µ½ÁËĞÂµÄµ±Ç°Ğ¡ÇøºÍÁÙ½üĞ¡ÇøĞÅÏ¢
-			if id == 0 then
-				dispatch("CELL_INFO_IND",cellinfo)
-			end
-		end
-	end
+    --åªå¤„ç†æœ‰æ•ˆçš„CENGä¿¡æ¯
+    if string.find(data, "%+CENG:%d+,\".+\"") then
+        local id, rssi, lac, ci, ta, mcc, mnc
+        id = string.match(data, "%+CENG:(%d)")
+        id = tonumber(id)
+        --ç¬¬ä¸€æ¡CENGä¿¡æ¯å’Œå…¶ä½™çš„æ ¼å¼ä¸åŒ
+        if id == 0 then
+            rssi, mcc, mnc, ci, lac, ta = string.match(data, "%+CENG: *%d, *\"%d+, *(%d+), *%d+, *(%d+), *(%d+), *%d+, *(%d+), *%d+, *%d+, *(%d+), *(%d+)\"")
+        else
+            rssi, mcc, mnc, ci, lac, ta = string.match(data, "%+CENG: *%d, *\"%d+, *(%d+), *(%d+), *(%d+), *%d+, *(%d+), *(%d+)\"")
+        end
+        --è§£ææ­£ç¡®
+        if rssi and ci and lac and mcc and mnc then
+            --å¦‚æœæ˜¯ç¬¬ä¸€æ¡ï¼Œæ¸…é™¤ä¿¡æ¯è¡¨
+            if id == 0 then
+                resetCellInfo()
+            end
+            --ä¿å­˜mccã€mncã€lacã€ciã€rssiã€ta
+            cellinfo[id + 1].mcc = mcc
+            cellinfo[id + 1].mnc = mnc
+            cellinfo[id + 1].lac = tonumber(lac)
+            cellinfo[id + 1].ci = tonumber(ci)
+            cellinfo[id + 1].rssi = (tonumber(rssi) == 99) and 0 or tonumber(rssi)
+            cellinfo[id + 1].ta = tonumber(ta or "0")
+            --äº§ç”Ÿä¸€ä¸ªå†…éƒ¨æ¶ˆæ¯CELL_INFO_INDï¼Œè¡¨ç¤ºè¯»å–åˆ°äº†æ–°çš„å½“å‰å°åŒºå’Œä¸´è¿‘å°åŒºä¿¡æ¯
+            if id == 0 then
+                if multicellcb then multicellcb(cellinfo) end
+                publish("CELL_INFO_IND", cellinfo)
+            end
+        end
+    end
+end
+
+-- crsmæ›´æ–°è®¡æ•°
+--local crsmUpdCnt = 0
+
+-- æ›´æ–°FPLMNçš„åº”ç­”å¤„ç†
+-- @string cmd  ,æ­¤åº”ç­”å¯¹åº”çš„ATå‘½ä»¤
+-- @bool success ,ATå‘½ä»¤æ‰§è¡Œç»“æœï¼Œtrueæˆ–è€…false
+-- @string response ,ATå‘½ä»¤çš„åº”ç­”ä¸­çš„æ‰§è¡Œç»“æœå­—ç¬¦ä¸²
+-- @string intermediate ,ATå‘½ä»¤çš„åº”ç­”ä¸­çš„ä¸­é—´ä¿¡æ¯
+-- @return æ— 
+--[[
+function crsmResponse(cmd, success, response, intermediate)
+    log.debug("net.crsmResponse", success)
+    if success then
+        sys.restart("net.crsmResponse suc")
+    else
+        crsmUpdCnt = crsmUpdCnt + 1
+        if crsmUpdCnt >= 3 then
+            sys.restart("net.crsmResponse tmout")
+        else
+            ril.request("AT+CRSM=214,28539,0,0,12,\"64f01064f03064f002fffff\"", nil, crsmResponse)
+        end
+    end
+end
+]]
+
+--[[
+å‡½æ•°åï¼šneturc
+åŠŸèƒ½  ï¼šæœ¬åŠŸèƒ½æ¨¡å—å†…â€œæ³¨å†Œçš„åº•å±‚coreé€šè¿‡è™šæ‹Ÿä¸²å£ä¸»åŠ¨ä¸ŠæŠ¥çš„é€šçŸ¥â€çš„å¤„ç†
+å‚æ•°  ï¼š
+dataï¼šé€šçŸ¥çš„å®Œæ•´å­—ç¬¦ä¸²ä¿¡æ¯
+prefixï¼šé€šçŸ¥çš„å‰ç¼€
+è¿”å›å€¼ï¼šæ— 
+]]
+local function neturc(data, prefix)
+    if prefix == "+CREG" then
+        --æ”¶åˆ°ç½‘ç»œçŠ¶æ€å˜åŒ–æ—¶,æ›´æ–°ä¸€ä¸‹ä¿¡å·å€¼
+        csqQueryPoll()
+        --è§£æcregä¿¡æ¯
+        creg(data)
+    elseif prefix == "+CENG" then
+        --è§£æcengä¿¡æ¯
+        ceng(data)
+    --[[elseif prefix == "+CRSM" then
+        local str = string.lower(data)
+        if string.match(str, "64f000") or string.match(str, "64f020") or string.match(str, "64f040") or string.match(str, "64f070") then
+            ril.request("AT+CRSM=214,28539,0,0,12,\"64f01064f03064f002fffff\"", nil, crsmResponse)
+        end]]
+    end
+end
+
+--- è®¾ç½®é£è¡Œæ¨¡å¼
+-- @bool modeï¼Œtrue:é£è¡Œæ¨¡å¼å¼€ï¼Œfalse:é£è¡Œæ¨¡å¼å…³
+-- @return nil
+-- @usage net.switchFly(mode)
+function switchFly(mode)
+    if flyMode == mode then return end
+    flyMode = mode
+    -- å¤„ç†é£è¡Œæ¨¡å¼
+    if mode then
+        ril.request("AT+CFUN=0")
+    -- å¤„ç†é€€å‡ºé£è¡Œæ¨¡å¼
+    else
+        ril.request("AT+CFUN=1")
+        --å¤„ç†æŸ¥è¯¢å®šæ—¶å™¨
+        csqQueryPoll()
+        cengQueryPoll()
+        --å¤ä½GSMç½‘ç»œçŠ¶æ€
+        neturc("2", "+CREG")
+    end
+end
+
+--- è·å–GSMç½‘ç»œæ³¨å†ŒçŠ¶æ€
+-- @return string state,GSMç½‘ç»œæ³¨å†ŒçŠ¶æ€ï¼Œ
+-- "INIT"è¡¨ç¤ºæ­£åœ¨åˆå§‹åŒ–
+-- "REGISTERED"è¡¨ç¤ºå·²æ³¨å†Œ
+-- "UNREGISTER"è¡¨ç¤ºæœªæ³¨å†Œ
+-- @usage net.getState()
+function getState()
+    return state
+end
+
+--- è·å–å½“å‰å°åŒºçš„mcc
+-- @return string mcc,å½“å‰å°åŒºçš„mccï¼Œå¦‚æœè¿˜æ²¡æœ‰æ³¨å†ŒGSMç½‘ç»œï¼Œåˆ™è¿”å›simå¡çš„mcc
+-- @usage net.getMcc()
+function getMcc()
+    return cellinfo[1].mcc or sim.getMcc()
+end
+
+--- è·å–å½“å‰å°åŒºçš„mnc
+-- @return string mcn,å½“å‰å°åŒºçš„mncï¼Œå¦‚æœè¿˜æ²¡æœ‰æ³¨å†ŒGSMç½‘ç»œï¼Œåˆ™è¿”å›simå¡çš„mnc
+-- @usage net.getMnc()
+function getMnc()
+    return cellinfo[1].mnc or sim.getMnc()
+end
+
+--- è·å–å½“å‰ä½ç½®åŒºID
+-- @return string lac,å½“å‰ä½ç½®åŒºID(16è¿›åˆ¶å­—ç¬¦ä¸²ï¼Œä¾‹å¦‚"18be")ï¼Œå¦‚æœè¿˜æ²¡æœ‰æ³¨å†ŒGSMç½‘ç»œï¼Œåˆ™è¿”å›""
+-- @usage net.getLac()
+function getLac()
+    return lac
+end
+
+--- è·å–å½“å‰å°åŒºID
+-- @return string ci,å½“å‰å°åŒºID(16è¿›åˆ¶å­—ç¬¦ä¸²ï¼Œä¾‹å¦‚"93e1")ï¼Œå¦‚æœè¿˜æ²¡æœ‰æ³¨å†ŒGSMç½‘ç»œï¼Œåˆ™è¿”å›""
+-- @usage net.getCi()
+function getCi()
+    return ci
+end
+
+--- è·å–ä¿¡å·å¼ºåº¦
+-- @return number rssi,å½“å‰ä¿¡å·å¼ºåº¦(å–å€¼èŒƒå›´0-31)
+-- @usage net.getRssi()
+function getRssi()
+    return rssi
+end
+
+--- è·å–å½“å‰å’Œä¸´è¿‘ä½ç½®åŒºã€å°åŒºä»¥åŠä¿¡å·å¼ºåº¦çš„æ‹¼æ¥å­—ç¬¦ä¸²
+-- @return string cellInfo,å½“å‰å’Œä¸´è¿‘ä½ç½®åŒºã€å°åŒºä»¥åŠä¿¡å·å¼ºåº¦çš„æ‹¼æ¥å­—ç¬¦ä¸²ï¼Œä¾‹å¦‚ï¼š"6311.49234.30;6311.49233.23;6322.49232.18;"
+-- @usage net.getCellInfo()
+function getCellInfo()
+    local i, ret = 1, ""
+    for i = 1, cellinfo.cnt do
+        if cellinfo[i] and cellinfo[i].lac and cellinfo[i].lac ~= 0 and cellinfo[i].ci and cellinfo[i].ci ~= 0 then
+            ret = ret .. cellinfo[i].lac .. "." .. cellinfo[i].ci .. "." .. cellinfo[i].rssi .. ";"
+        end
+    end
+    return ret
+end
+
+--- è·å–å½“å‰å’Œä¸´è¿‘ä½ç½®åŒºã€å°åŒºã€mccã€mncã€ä»¥åŠä¿¡å·å¼ºåº¦çš„æ‹¼æ¥å­—ç¬¦ä¸²
+-- @return string cellInfo,å½“å‰å’Œä¸´è¿‘ä½ç½®åŒºã€å°åŒºã€mccã€mncã€ä»¥åŠä¿¡å·å¼ºåº¦çš„æ‹¼æ¥å­—ç¬¦ä¸²ï¼Œä¾‹å¦‚ï¼š"460.01.6311.49234.30;460.01.6311.49233.23;460.02.6322.49232.18;"
+-- @usage net.getCellInfoExt()
+function getCellInfoExt()
+    local i, ret = 1, ""
+    for i = 1, cellinfo.cnt do
+        if cellinfo[i] and cellinfo[i].mcc and cellinfo[i].mnc and cellinfo[i].lac and cellinfo[i].lac ~= 0 and cellinfo[i].ci and cellinfo[i].ci ~= 0 then
+            ret = ret .. cellinfo[i].mcc .. "." .. cellinfo[i].mnc .. "." .. cellinfo[i].lac .. "." .. cellinfo[i].ci .. "." .. cellinfo[i].rssi .. ";"
+        end
+    end
+    return ret
+end
+
+--- è·å–TAå€¼
+-- @return number ta,TAå€¼
+-- @usage net.getTa()
+function getTa()
+    return cellinfo[1].ta
 end
 
 --[[
-º¯ÊıÃû£ºneturc
-¹¦ÄÜ  £º±¾¹¦ÄÜÄ£¿éÄÚ¡°×¢²áµÄµ×²ãcoreÍ¨¹ıĞéÄâ´®¿ÚÖ÷¶¯ÉÏ±¨µÄÍ¨Öª¡±µÄ´¦Àí
-²ÎÊı  £º
-		data£ºÍ¨ÖªµÄÍêÕû×Ö·û´®ĞÅÏ¢
-		prefix£ºÍ¨ÖªµÄÇ°×º
-·µ»ØÖµ£ºÎŞ
+å‡½æ•°åï¼šrsp
+åŠŸèƒ½  ï¼šæœ¬åŠŸèƒ½æ¨¡å—å†…â€œé€šè¿‡è™šæ‹Ÿä¸²å£å‘é€åˆ°åº•å±‚coreè½¯ä»¶çš„ATå‘½ä»¤â€çš„åº”ç­”å¤„ç†
+å‚æ•°  ï¼š
+cmdï¼šæ­¤åº”ç­”å¯¹åº”çš„ATå‘½ä»¤
+successï¼šATå‘½ä»¤æ‰§è¡Œç»“æœï¼Œtrueæˆ–è€…false
+responseï¼šATå‘½ä»¤çš„åº”ç­”ä¸­çš„æ‰§è¡Œç»“æœå­—ç¬¦ä¸²
+intermediateï¼šATå‘½ä»¤çš„åº”ç­”ä¸­çš„ä¸­é—´ä¿¡æ¯
+è¿”å›å€¼ï¼šæ— 
 ]]
-local function neturc(data,prefix)
-	if prefix == "+CREG" then
-		--ÊÕµ½ÍøÂç×´Ì¬±ä»¯Ê±,¸üĞÂÒ»ÏÂĞÅºÅÖµ
-		csqquery()
-		--½âÎöcregĞÅÏ¢
-		creg(data)
-	elseif prefix == "+CENG" then
-		--½âÎöcengĞÅÏ¢
-		ceng(data)
-	end
+local function rsp(cmd, success, response, intermediate)
+    local prefix = string.match(cmd, "AT(%+%u+)")
+    
+    log.info("net.rsp",cmd, success, response, intermediate)
+    
+    if prefix == "+CSQ" then
+        if intermediate ~= nil then
+            local s = string.match(intermediate, "+CSQ:%s*(%d+)")
+            if s ~= nil then
+                rssi = tonumber(s)
+                rssi = rssi == 99 and 0 or rssi
+                --äº§ç”Ÿä¸€ä¸ªå†…éƒ¨æ¶ˆæ¯GSM_SIGNAL_REPORT_INDï¼Œè¡¨ç¤ºè¯»å–åˆ°äº†ä¿¡å·å¼ºåº¦
+                publish("GSM_SIGNAL_REPORT_IND", success, rssi)
+            end
+        end
+    elseif prefix == "+CFUN" then
+        if success then publish("FLYMODE", flyMode) end
+    end
 end
 
---[[
-º¯ÊıÃû£ºgetstate
-¹¦ÄÜ  £º»ñÈ¡GSMÍøÂç×¢²á×´Ì¬
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºGSMÍøÂç×¢²á×´Ì¬(INIT¡¢REGISTERED¡¢UNREGISTER)
-]]
-function getstate()
-	return state
+--- å®æ—¶è¯»å–â€œå½“å‰å’Œä¸´è¿‘å°åŒºä¿¡æ¯â€
+-- @function cbFncï¼Œå›è°ƒå‡½æ•°ï¼Œå½“è¯»å–åˆ°å°åŒºä¿¡æ¯åï¼Œä¼šè°ƒç”¨æ­¤å›è°ƒå‡½æ•°ï¼Œå›è°ƒå‡½æ•°çš„è°ƒç”¨å½¢å¼ä¸ºï¼š
+-- cbFnc(cells)ï¼Œå…¶ä¸­cellsä¸ºstringç±»å‹ï¼Œæ ¼å¼ä¸ºï¼šå½“å‰å’Œä¸´è¿‘ä½ç½®åŒºã€å°åŒºã€mccã€mncã€ä»¥åŠä¿¡å·å¼ºåº¦çš„æ‹¼æ¥å­—ç¬¦ä¸²ï¼Œä¾‹å¦‚ï¼š"460.01.6311.49234.30;460.01.6311.49233.23;460.02.6322.49232.18;"
+-- @return nil
+function getMultiCell(cbFnc)
+    multicellcb = cbFnc
+    --å‘é€AT+CENG?æŸ¥è¯¢
+    ril.request("AT+CENG?")
 end
 
---[[
-º¯ÊıÃû£ºgetmcc
-¹¦ÄÜ  £º»ñÈ¡µ±Ç°Ğ¡ÇøµÄmcc
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºµ±Ç°Ğ¡ÇøµÄmcc£¬Èç¹û»¹Ã»ÓĞ×¢²áGSMÍøÂç£¬Ôò·µ»Øsim¿¨µÄmcc
-]]
-function getmcc()
-	return cellinfo[1].mcc or sim.getmcc()
+--- å‘èµ·æŸ¥è¯¢åŸºç«™ä¿¡æ¯(å½“å‰å’Œä¸´è¿‘å°åŒºä¿¡æ¯)çš„è¯·æ±‚
+-- @number period æŸ¥è¯¢é—´éš”ï¼Œå•ä½æ¯«ç§’
+-- @return bool result, true:æŸ¥è¯¢æˆåŠŸï¼Œfalse:æŸ¥è¯¢å¤±è´¥
+-- @usage net.cengQueryPoll() --æŸ¥è¯¢1æ¬¡
+-- @usage net.cengQueryPoll(60000) --æ¯åˆ†é’ŸæŸ¥è¯¢1æ¬¡
+function cengQueryPoll(period)
+    -- ä¸æ˜¯é£è¡Œæ¨¡å¼ å¹¶ä¸” å·¥ä½œæ¨¡å¼ä¸ºå®Œæ•´æ¨¡å¼
+    if not flyMode then        
+        --å‘é€AT+CENG?æŸ¥è¯¢
+        ril.request("AT+CENG?")
+    else
+        log.warn("net.cengQueryPoll", "flymode:", flyMode)
+    end
+    if nil ~= period then
+        --å¯åŠ¨å®šæ—¶å™¨
+        sys.timerStopAll(cengQueryPoll)
+        sys.timerStart(cengQueryPoll, period, period)
+    end
+    return not flyMode
 end
 
---[[
-º¯ÊıÃû£ºgetmnc
-¹¦ÄÜ  £º»ñÈ¡µ±Ç°Ğ¡ÇøµÄmnc
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºµ±Ç°Ğ¡ÇøµÄmnc£¬Èç¹û»¹Ã»ÓĞ×¢²áGSMÍøÂç£¬Ôò·µ»Øsim¿¨µÄmnc
-]]
-function getmnc()
-	return cellinfo[1].mnc or sim.getmnc()
+--- å‘èµ·æŸ¥è¯¢ä¿¡å·å¼ºåº¦çš„è¯·æ±‚
+-- @number period æŸ¥è¯¢é—´éš”ï¼Œå•ä½æ¯«ç§’
+-- @return bool , true:æŸ¥è¯¢æˆåŠŸï¼Œfalse:æŸ¥è¯¢åœæ­¢
+-- @usage net.csqQueryPoll() --æŸ¥è¯¢1æ¬¡
+-- @usage net.csqQueryPoll(60000) --æ¯åˆ†é’ŸæŸ¥è¯¢1æ¬¡
+function csqQueryPoll(period)
+    --ä¸æ˜¯é£è¡Œæ¨¡å¼ å¹¶ä¸” å·¥ä½œæ¨¡å¼ä¸ºå®Œæ•´æ¨¡å¼
+    if not flyMode then        
+        --å‘é€AT+CSQæŸ¥è¯¢
+        ril.request("AT+CSQ")
+    else
+        log.warn("net.csqQueryPoll", "flymode:", flyMode)
+    end
+    if nil ~= period then
+        --å¯åŠ¨å®šæ—¶å™¨
+        sys.timerStopAll(csqQueryPoll)
+        sys.timerStart(csqQueryPoll, period, period)
+    end
+    return not flyMode
 end
 
---[[
-º¯ÊıÃû£ºgetlac
-¹¦ÄÜ  £º»ñÈ¡µ±Ç°Î»ÖÃÇøID
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºµ±Ç°Î»ÖÃÇøID(16½øÖÆ×Ö·û´®£¬ÀıÈç"18be")£¬Èç¹û»¹Ã»ÓĞ×¢²áGSMÍøÂç£¬Ôò·µ»Ø""
-]]
-function getlac()
-	return lac
+
+--- è®¾ç½®æŸ¥è¯¢ä¿¡å·å¼ºåº¦å’ŒåŸºç«™ä¿¡æ¯çš„é—´éš”
+-- @number ... æŸ¥è¯¢å‘¨æœŸ,å‚æ•°å¯å˜ï¼Œå‚æ•°ä¸ºnilåªæŸ¥è¯¢1æ¬¡ï¼Œå‚æ•°1æ˜¯ä¿¡å·å¼ºåº¦æŸ¥è¯¢å‘¨æœŸï¼Œå‚æ•°2æ˜¯åŸºç«™æŸ¥è¯¢å‘¨æœŸ
+-- @return bool ï¼Œtrueï¼šè®¾ç½®æˆåŠŸï¼Œfalseï¼šè®¾ç½®å¤±è´¥
+-- @usage net.startQueryAll()
+-- @usage net.startQueryAll(60000) -- 1åˆ†é’ŸæŸ¥è¯¢1æ¬¡ä¿¡å·å¼ºåº¦ï¼Œåªç«‹å³æŸ¥è¯¢1æ¬¡åŸºç«™ä¿¡æ¯
+-- @usage net.startQueryAll(60000,600000) -- 1åˆ†é’ŸæŸ¥è¯¢1æ¬¡ä¿¡å·å¼ºåº¦ï¼Œ10åˆ†é’ŸæŸ¥è¯¢1æ¬¡åŸºç«™ä¿¡æ¯
+function startQueryAll(...)
+    csqQueryPoll(arg[1])
+    cengQueryPoll(arg[2])
+    if flyMode then        
+        log.info("sim.startQuerAll", "flyMode:", flyMode)
+    end
+    return true
 end
 
---[[
-º¯ÊıÃû£ºgetci
-¹¦ÄÜ  £º»ñÈ¡µ±Ç°Ğ¡ÇøID
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºµ±Ç°Ğ¡ÇøID(16½øÖÆ×Ö·û´®£¬ÀıÈç"93e1")£¬Èç¹û»¹Ã»ÓĞ×¢²áGSMÍøÂç£¬Ôò·µ»Ø""
-]]
-function getci()
-	return ci
+--- åœæ­¢æŸ¥è¯¢ä¿¡å·å¼ºåº¦å’ŒåŸºç«™ä¿¡æ¯
+-- @return æ— 
+-- @usage net.stopQueryAll()
+function stopQueryAll()
+    sys.timerStopAll(csqQueryPoll)
+    sys.timerStopAll(cengQueryPoll)
 end
 
---[[
-º¯ÊıÃû£ºgetrssi
-¹¦ÄÜ  £º»ñÈ¡ĞÅºÅÇ¿¶È
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºµ±Ç°ĞÅºÅÇ¿¶È(È¡Öµ·¶Î§0-31)
-]]
-function getrssi()
-	return rssi
-end
+-- å¤„ç†SIMå¡çŠ¶æ€æ¶ˆæ¯ï¼ŒSIMå¡å·¥ä½œä¸æ­£å¸¸æ—¶æ›´æ–°ç½‘ç»œçŠ¶æ€ä¸ºæœªæ³¨å†Œ
+sys.subscribe("SIM_IND", function(para)
+    log.info("SIM.subscribe", simerrsta, para)
+    if simerrsta ~= (para ~= "RDY") then
+        simerrsta = (para ~= "RDY")
+    end
+    --simå¡å·¥ä½œä¸æ­£å¸¸
+    if para ~= "RDY" then
+        --æ›´æ–°GSMç½‘ç»œçŠ¶æ€
+        state = "UNREGISTER"
+        --äº§ç”Ÿå†…éƒ¨æ¶ˆæ¯NET_STATE_CHANGEDï¼Œè¡¨ç¤ºç½‘ç»œçŠ¶æ€å‘ç”Ÿå˜åŒ–
+        publish("NET_STATE_UNREGISTER")
+    else
+        state = "INIT"
+    end
+end)
 
---[[
-º¯ÊıÃû£ºgetcell
-¹¦ÄÜ  £º»ñÈ¡µ±Ç°ºÍÁÙ½üĞ¡ÇøÒÔ¼°ĞÅºÅÇ¿¶ÈµÄÆ´½Ó×Ö·û´®
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºµ±Ç°ºÍÁÙ½üĞ¡ÇøÒÔ¼°ĞÅºÅÇ¿¶ÈµÄÆ´½Ó×Ö·û´®£¬ÀıÈç£º49234.30.49233.23.49232.18.
-]]
-function getcell()
-	local i,ret = 1,""
-	for i=1,cellinfo.cnt do
-		if cellinfo[i] and cellinfo[i].lac and cellinfo[i].lac ~= 0 and cellinfo[i].ci and cellinfo[i].ci ~= 0 then
-			ret = ret..cellinfo[i].ci.."."..cellinfo[i].rssi.."."
-		end
-	end
-	return ret
-end
-
---[[
-º¯ÊıÃû£ºgetcellinfo
-¹¦ÄÜ  £º»ñÈ¡µ±Ç°ºÍÁÙ½üÎ»ÖÃÇø¡¢Ğ¡ÇøÒÔ¼°ĞÅºÅÇ¿¶ÈµÄÆ´½Ó×Ö·û´®
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºµ±Ç°ºÍÁÙ½üÎ»ÖÃÇø¡¢Ğ¡ÇøÒÔ¼°ĞÅºÅÇ¿¶ÈµÄÆ´½Ó×Ö·û´®£¬ÀıÈç£º6311.49234.30;6311.49233.23;6322.49232.18;
-]]
-function getcellinfo()
-	local i,ret = 1,""
-	for i=1,cellinfo.cnt do
-		if cellinfo[i] and cellinfo[i].lac and cellinfo[i].lac ~= 0 and cellinfo[i].ci and cellinfo[i].ci ~= 0 then
-			ret = ret..cellinfo[i].lac.."."..cellinfo[i].ci.."."..cellinfo[i].rssi..";"
-		end
-	end
-	return ret
-end
-
---[[
-º¯ÊıÃû£ºgetcellinfoext
-¹¦ÄÜ  £º»ñÈ¡µ±Ç°ºÍÁÙ½üÎ»ÖÃÇø¡¢Ğ¡Çø¡¢mcc¡¢mnc¡¢ÒÔ¼°ĞÅºÅÇ¿¶ÈµÄÆ´½Ó×Ö·û´®
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºµ±Ç°ºÍÁÙ½üÎ»ÖÃÇø¡¢Ğ¡Çø¡¢mcc¡¢mnc¡¢ÒÔ¼°ĞÅºÅÇ¿¶ÈµÄÆ´½Ó×Ö·û´®£¬ÀıÈç£º460.01.6311.49234.30;460.01.6311.49233.23;460.02.6322.49232.18;
-]]
-function getcellinfoext()
-	local i,ret = 1,""
-	for i=1,cellinfo.cnt do
-		if cellinfo[i] and cellinfo[i].mcc and cellinfo[i].mnc and cellinfo[i].lac and cellinfo[i].lac ~= 0 and cellinfo[i].ci and cellinfo[i].ci ~= 0 then
-			ret = ret..cellinfo[i].mcc.."."..cellinfo[i].mnc.."."..cellinfo[i].lac.."."..cellinfo[i].ci.."."..cellinfo[i].rssi..";"
-		end
-	end
-	return ret
-end
-
---[[
-º¯ÊıÃû£ºgetta
-¹¦ÄÜ  £º»ñÈ¡TAÖµ
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºTAÖµ
-]]
-function getta()
-	return cellinfo[1].ta
-end
-
---[[
-º¯ÊıÃû£ºstartquerytimer
-¹¦ÄÜ  £º¿Õº¯Êı£¬ÎŞ¹¦ÄÜ£¬Ö»ÊÇÎªÁË¼æÈİÖ®Ç°Ğ´µÄÓ¦ÓÃ½Å±¾
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-function startquerytimer() end
-
---[[
-º¯ÊıÃû£ºsimind
-¹¦ÄÜ  £ºÄÚ²¿ÏûÏ¢SIM_INDµÄ´¦Àíº¯Êı
-²ÎÊı  £º
-		para£º²ÎÊı£¬±íÊ¾SIM¿¨×´Ì¬
-·µ»ØÖµ£ºÎŞ
-]]
-local function simind(para)
-	print("simind",simerrsta,para)
-	if simerrsta ~= (para~="RDY") then
-		simerrsta = (para~="RDY")
-		procled()
-	end
-	--sim¿¨¹¤×÷²»Õı³£
-	if para ~= "RDY" then
-		--¸üĞÂGSMÍøÂç×´Ì¬
-		state = "UNREGISTER"
-		--²úÉúÄÚ²¿ÏûÏ¢NET_STATE_CHANGED£¬±íÊ¾ÍøÂç×´Ì¬·¢Éú±ä»¯
-		dispatch("NET_STATE_CHANGED",state)
-	end
-	return true
-end
-
---[[
-º¯ÊıÃû£ºflyind
-¹¦ÄÜ  £ºÄÚ²¿ÏûÏ¢FLYMODE_INDµÄ´¦Àíº¯Êı
-²ÎÊı  £º
-		para£º²ÎÊı£¬±íÊ¾·ÉĞĞÄ£Ê½×´Ì¬£¬true±íÊ¾½øÈë·ÉĞĞÄ£Ê½£¬false±íÊ¾ÍË³ö·ÉĞĞÄ£Ê½
-·µ»ØÖµ£ºÎŞ
-]]
-local function flyind(para)
-	--·ÉĞĞÄ£Ê½×´Ì¬·¢Éú±ä»¯
-	if flymode~=para then
-		flymode = para
-		--¿ØÖÆÍøÂçÖ¸Ê¾µÆ
-		procled()
-	end
-	--ÍË³ö·ÉĞĞÄ£Ê½
-	if not para then
-		----´¦Àí²éÑ¯¶¨Ê±Æ÷
-		startcsqtimer()
-		startcengtimer()
-		--¸´Î»GSMÍøÂç×´Ì¬
-		neturc("2","+CREG")
-	end
-	return true
-end
-
---[[
-º¯ÊıÃû£ºworkmodeind
-¹¦ÄÜ  £ºÄÚ²¿ÏûÏ¢SYS_WORKMODE_INDµÄ´¦Àíº¯Êı
-²ÎÊı  £º
-		para£º²ÎÊı£¬±íÊ¾ÏµÍ³¹¤×÷Ä£Ê½
-·µ»ØÖµ£ºÎŞ
-]]
-local function workmodeind(para)
-	--´¦Àí²éÑ¯¶¨Ê±Æ÷
-	startcengtimer()
-	startcsqtimer()
-	return true
-end
-
---[[
-º¯ÊıÃû£ºstartcsqtimer
-¹¦ÄÜ  £ºÓĞÑ¡ÔñĞÔµÄÆô¶¯¡°ĞÅºÅÇ¿¶È²éÑ¯¡±¶¨Ê±Æ÷
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-function startcsqtimer()
-	--²»ÊÇ·ÉĞĞÄ£Ê½ ²¢ÇÒ (´ò¿ªÁË²éÑ¯¿ª¹Ø »òÕß ¹¤×÷Ä£Ê½ÎªÍêÕûÄ£Ê½)
-	if not flymode and (csqswitch or sys.getworkmode()==sys.FULL_MODE) then
-		--·¢ËÍAT+CSQ²éÑ¯
-		csqquery()
-		--Æô¶¯¶¨Ê±Æ÷
-		sys.timer_start(startcsqtimer,csqqrypriod)
-	end
-end
-
---[[
-º¯ÊıÃû£ºstartcengtimer
-¹¦ÄÜ  £ºÓĞÑ¡ÔñĞÔµÄÆô¶¯¡°µ±Ç°ºÍÁÙ½üĞ¡ÇøĞÅÏ¢²éÑ¯¡±¶¨Ê±Æ÷
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-function startcengtimer()
-	--ÉèÖÃÁË²éÑ¯¼ä¸ô ²¢ÇÒ ²»ÊÇ·ÉĞĞÄ£Ê½ ²¢ÇÒ (´ò¿ªÁË²éÑ¯¿ª¹Ø »òÕß ¹¤×÷Ä£Ê½ÎªÍêÕûÄ£Ê½)
-	if cengqrypriod and not flymode and (cengswitch or sys.getworkmode()==sys.FULL_MODE) then
-		--·¢ËÍAT+CENG?²éÑ¯
-		cengquery()
-		--Æô¶¯¶¨Ê±Æ÷
-		sys.timer_start(startcengtimer,cengqrypriod)
-	end
-end
-
---[[
-º¯ÊıÃû£ºrsp
-¹¦ÄÜ  £º±¾¹¦ÄÜÄ£¿éÄÚ¡°Í¨¹ıĞéÄâ´®¿Ú·¢ËÍµ½µ×²ãcoreÈí¼şµÄATÃüÁî¡±µÄÓ¦´ğ´¦Àí
-²ÎÊı  £º
-		cmd£º´ËÓ¦´ğ¶ÔÓ¦µÄATÃüÁî
-		success£ºATÃüÁîÖ´ĞĞ½á¹û£¬true»òÕßfalse
-		response£ºATÃüÁîµÄÓ¦´ğÖĞµÄÖ´ĞĞ½á¹û×Ö·û´®
-		intermediate£ºATÃüÁîµÄÓ¦´ğÖĞµÄÖĞ¼äĞÅÏ¢
-·µ»ØÖµ£ºÎŞ
-]]
-local function rsp(cmd,success,response,intermediate)
-	local prefix = string.match(cmd,"AT(%+%u+)")
-
-	if intermediate ~= nil then
-		if prefix == "+CSQ" then
-			local s = smatch(intermediate,"+CSQ:%s*(%d+)")
-			if s ~= nil then
-				rssi = tonumber(s)
-				rssi = rssi == 99 and 0 or rssi
-				--²úÉúÒ»¸öÄÚ²¿ÏûÏ¢GSM_SIGNAL_REPORT_IND£¬±íÊ¾¶ÁÈ¡µ½ÁËĞÅºÅÇ¿¶È
-				dispatch("GSM_SIGNAL_REPORT_IND",success,rssi)
-			end
-		elseif prefix == "+CENG" then
-		end
-	end
-end
-
---[[
-º¯ÊıÃû£ºsetcsqqueryperiod
-¹¦ÄÜ  £ºÉèÖÃ¡°ĞÅºÅÇ¿¶È¡±²éÑ¯¼ä¸ô
-²ÎÊı  £º
-		period£º²éÑ¯¼ä¸ô£¬µ¥Î»ºÁÃë
-·µ»ØÖµ£ºÎŞ
-]]
-function setcsqqueryperiod(period)
-	csqqrypriod = period
-	startcsqtimer()
-end
-
---[[
-º¯ÊıÃû£ºsetcengqueryperiod
-¹¦ÄÜ  £ºÉèÖÃ¡°µ±Ç°ºÍÁÙ½üĞ¡ÇøĞÅÏ¢¡±²éÑ¯¼ä¸ô
-²ÎÊı  £º
-		period£º²éÑ¯¼ä¸ô£¬µ¥Î»ºÁÃë¡£Èç¹ûĞ¡ÓÚµÈÓÚ0£¬±íÊ¾Í£Ö¹²éÑ¯¹¦ÄÜ
-·µ»ØÖµ£ºÎŞ
-]]
-function setcengqueryperiod(period)
-	if period ~= cengqrypriod then		
-		if period <= 0 then
-			sys.timer_stop(startcengtimer)
-		else
-			cengqrypriod = period
-			startcengtimer()
-		end
-	end
-end
-
---[[
-º¯ÊıÃû£ºcengquery
-¹¦ÄÜ  £º²éÑ¯¡°µ±Ç°ºÍÁÙ½üĞ¡ÇøĞÅÏ¢¡±
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-function cengquery()
-	--²»ÊÇ·ÉĞĞÄ£Ê½£¬·¢ËÍAT+CENG?
-	if not flymode then	req("AT+CENG?")	end
-end
-
---[[
-º¯ÊıÃû£ºsetcengswitch
-¹¦ÄÜ  £ºÉèÖÃ¡°µ±Ç°ºÍÁÙ½üĞ¡ÇøĞÅÏ¢¡±²éÑ¯¿ª¹Ø
-²ÎÊı  £º
-		v£ºtrueÎª¿ªÆô£¬ÆäÓàÎª¹Ø±Õ
-·µ»ØÖµ£ºÎŞ
-]]
-function setcengswitch(v)
-	cengswitch = v
-	--¿ªÆô²¢ÇÒ²»ÊÇ·ÉĞĞÄ£Ê½
-	if v and not flymode then startcengtimer() end
-end
-
---[[
-º¯ÊıÃû£ºcellinfoind
-¹¦ÄÜ  £ºCELL_INFO_INDÏûÏ¢µÄ´¦Àíº¯Êı
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÈç¹ûÓĞÓÃ»§×Ô¶¨ÒåµÄ»ñÈ¡¶à»ùÕ¾ĞÅÏ¢µÄ»Øµ÷º¯Êı£¬Ôò·µ»Ønil£»·ñÔò·µ»Øtrue
-]]
-local function cellinfoind()
-	if multicellcb then
-		local cb = multicellcb
-		multicellcb = nil
-		cb(getcellinfoext())
-	else
-		return true
-	end
-end
-
---[[
-º¯ÊıÃû£ºgetmulticell
-¹¦ÄÜ  £º¶ÁÈ¡¡°µ±Ç°ºÍÁÙ½üĞ¡ÇøĞÅÏ¢¡±
-²ÎÊı  £º
-		cb£º»Øµ÷º¯Êı£¬µ±¶ÁÈ¡µ½Ğ¡ÇøĞÅÏ¢ºó£¬»áµ÷ÓÃ´Ë»Øµ÷º¯Êı£¬µ÷ÓÃĞÎÊ½Îªcb(cells)£¬ÆäÖĞcellsÎªstringÀàĞÍ£¬¸ñÊ½Îª£º
-		    µ±Ç°ºÍÁÙ½üÎ»ÖÃÇø¡¢Ğ¡Çø¡¢mcc¡¢mnc¡¢ÒÔ¼°ĞÅºÅÇ¿¶ÈµÄÆ´½Ó×Ö·û´®£¬ÀıÈç£º460.01.6311.49234.30;460.01.6311.49233.23;460.02.6322.49232.18;
-·µ»ØÖµ£ºÎŞ 
-]]
-function getmulticell(cb)
-	multicellcb = cb
-	cengquery()
-end
-
---[[
-º¯ÊıÃû£ºcsqquery
-¹¦ÄÜ  £º²éÑ¯¡°ĞÅºÅÇ¿¶È¡±
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-function csqquery()
-	--²»ÊÇ·ÉĞĞÄ£Ê½£¬·¢ËÍAT+CSQ
-	if not flymode then req("AT+CSQ") end
-end
-
---[[
-º¯ÊıÃû£ºsetcsqswitch
-¹¦ÄÜ  £ºÉèÖÃ¡°ĞÅºÅÇ¿¶È¡±²éÑ¯¿ª¹Ø
-²ÎÊı  £º
-		v£ºtrueÎª¿ªÆô£¬ÆäÓàÎª¹Ø±Õ
-·µ»ØÖµ£ºÎŞ
-]]
-function setcsqswitch(v)
-	csqswitch = v
-	--¿ªÆô²¢ÇÒ²»ÊÇ·ÉĞĞÄ£Ê½
-	if v and not flymode then startcsqtimer() end
-end
-
---[[
-º¯ÊıÃû£ºledblinkon
-¹¦ÄÜ  £ºµãÁÁÍøÂçÖ¸Ê¾µÆ
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-local function ledblinkon()
-	--print("ledblinkon",ledstate,ledontime,ledofftime)
-	--Òı½ÅÊä³öµçÆ½¿ØÖÆÖ¸Ê¾µÆµãÁÁ
-	pio.pin.setval(ledvalid==1 and 1 or 0,ledpin)
-	--³£Ãğ
-	if ledontime==0 and ledofftime==0xFFFF then
-		ledblinkoff()
-	--³£ÁÁ
-	elseif ledontime==0xFFFF and ledofftime==0 then
-		--¹Ø±ÕµãÁÁÊ±³¤¶¨Ê±Æ÷ºÍÏ¨ÃğÊ±³¤¶¨Ê±Æ÷
-		sys.timer_stop(ledblinkon)
-		sys.timer_stop(ledblinkoff)
-	--ÉÁË¸
-	else
-		--Æô¶¯µãÁÁÊ±³¤¶¨Ê±Æ÷£¬¶¨Ê±µ½ÁËÖ®ºó£¬Ï¨ÃğÖ¸Ê¾µÆ
-		sys.timer_start(ledblinkoff,ledontime)
-	end	
-end
-
---[[
-º¯ÊıÃû£ºledblinkoff
-¹¦ÄÜ  £ºÏ¨ÃğÍøÂçÖ¸Ê¾µÆ
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-function ledblinkoff()
-	--print("ledblinkoff",ledstate,ledontime,ledofftime)
-	--Òı½ÅÊä³öµçÆ½¿ØÖÆÖ¸Ê¾µÆÏ¨Ãğ
-	pio.pin.setval(ledvalid==1 and 0 or 1,ledpin)
-	--³£Ãğ
-	if ledontime==0 and ledofftime==0xFFFF then
-		--¹Ø±ÕµãÁÁÊ±³¤¶¨Ê±Æ÷ºÍÏ¨ÃğÊ±³¤¶¨Ê±Æ÷
-		sys.timer_stop(ledblinkon)
-		sys.timer_stop(ledblinkoff)
-	--³£ÁÁ
-	elseif ledontime==0xFFFF and ledofftime==0 then
-		ledblinkon()
-	--ÉÁË¸
-	else
-		--Æô¶¯Ï¨ÃğÊ±³¤¶¨Ê±Æ÷£¬¶¨Ê±µ½ÁËÖ®ºó£¬µãÁÁÖ¸Ê¾µÆ
-		sys.timer_start(ledblinkon,ledofftime)
-	end	
-end
-
---[[
-º¯ÊıÃû£ºprocled
-¹¦ÄÜ  £º¸üĞÂÍøÂçÖ¸Ê¾µÆ×´Ì¬ÒÔ¼°µãÁÁºÍÏ¨ÃğÊ±³¤
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-function procled()
-	print("procled",ledflg,ledstate,flymode,usersckconnect,userscksslconnect,cgatt,state)
-	--Èç¹û¿ªÆôÁËÍøÂçÖ¸Ê¾µÆ¹¦ÄÜ
-	if ledflg then
-		local newstate,newontime,newofftime = "IDLE",ledidleon,ledidleoff
-		--·ÉĞĞÄ£Ê½
-		if flymode then
-			newstate,newontime,newofftime = "FLYMODE",ledflymodeon,ledflymodeoff
-		elseif simerrsta then
-			newstate,newontime,newofftime = "SIMERR",ledsimerron,ledsimerroff
-		--ÓÃ»§socketÁ¬½Óµ½ÁËºóÌ¨
-		elseif usersckconnect or userscksslconnect then
-			newstate,newontime,newofftime = "SCK",ledsckon,ledsckoff
-		--¸½×ÅÉÏGPRSÊı¾İÍøÂç
-		elseif cgatt then
-			newstate,newontime,newofftime = "CGATT",ledcgatton,ledcgattoff
-		--×¢²áÉÏGSMÍøÂç
-		elseif state=="REGISTERED" then
-			newstate,newontime,newofftime = "CREG",ledcregon,ledcregoff		
-		end
-		--Ö¸Ê¾µÆ×´Ì¬·¢Éú±ä»¯
-		if newstate~=ledstate then
-			ledstate,ledontime,ledofftime = newstate,newontime,newofftime
-			ledblinkoff()
-		end
-	end
-end
-
---[[
-º¯ÊıÃû£ºusersckind
-¹¦ÄÜ  £ºÄÚ²¿ÏûÏ¢USER_SOCKET_CONNECTµÄ´¦Àíº¯Êı
-²ÎÊı  £º
-		v£º²ÎÊı£¬±íÊ¾ÓÃ»§socketÊÇ·ñÁ¬½ÓÉÏºóÌ¨
-·µ»ØÖµ£ºÎŞ
-]]
-local function usersckind(v)
-	print("usersckind",v)
-	if usersckconnect~=v then
-		usersckconnect = v
-		procled()
-	end
-end
-
-local function userscksslind(v)
-	print("userscksslind",v)
-	if userscksslconnect~=v then
-		userscksslconnect = v
-		procled()
-	end
-end
-
---[[
-º¯ÊıÃû£ºcgattind
-¹¦ÄÜ  £ºÄÚ²¿ÏûÏ¢NET_GPRS_READYµÄ´¦Àíº¯Êı
-²ÎÊı  £º
-		v£º²ÎÊı£¬±íÊ¾ÊÇ·ñ¸½×ÅÉÏGPRSÊı¾İÍøÂç
-·µ»ØÖµ£ºÎŞ
-]]
-local function cgattind(v)
-	print("cgattind",v)
-	if cgatt~=v then
-		cgatt = v
-		procled()
-	end
-	return true
-end
-
---[[
-º¯ÊıÃû£ºsetled
-¹¦ÄÜ  £ºÉèÖÃÍøÂçÖ¸Ê¾µÆ¹¦ÄÜ
-²ÎÊı  £º
-		v£ºÖ¸Ê¾µÆ¿ª¹Ø£¬trueÎª¿ªÆô£¬ÆäÓàÎª¹Ø±Õ
-		pin£ºÖ¸Ê¾µÆ¿ØÖÆÒı½Å£¬¿ÉÑ¡
-		valid£ºÒı½ÅÊä³öºÎÖÖµçÆ½»áµãÁÁÖ¸Ê¾µÆ£¬1Îª¸ß£¬0ÎªµÍ£¬¿ÉÑ¡
-		flymodeon,flymodeoff,simerron,simerroff,idleon,idleoff,cregon,cregoff,cgatton,cgattoff,sckon,sckoff£ºFLYMODE,SIMERR,IDLE,CREG,CGATT,SCK×´Ì¬ÏÂÖ¸Ê¾µÆµÄµãÁÁºÍÏ¨ÃğÊ±³¤(ºÁÃë)£¬¿ÉÑ¡
-·µ»ØÖµ£ºÎŞ
-]]
-function setled(v,pin,valid,flymodeon,flymodeoff,simerron,simerroff,idleon,idleoff,cregon,cregoff,cgatton,cgattoff,sckon,sckoff)
-	local c1 = (ledflg~=v or ledpin~=(pin or ledpin) or ledvalid~=(valid or ledvalid))
-	local c2 = (ledidleon~=(idleon or ledidleon) or ledidleoff~=(idleoff or ledidleoff) or flymodeon~=(flymodeon or ledflymodeon) or flymodeoff~=(flymodeoff or ledflymodeoff))
-	local c3 = (ledcregon~=(cregon or ledcregon) or ledcregoff~=(cregoff or ledcregoff) or ledcgatton~=(cgatton or ledcgatton) or simerron~=(simerron or ledsimerron))
-	local c4 = (ledcgattoff~=(cgattoff or ledcgattoff) or ledsckon~=(sckon or ledsckon) or ledsckoff~=(sckoff or ledsckoff) or simerroff~=(simerroff or ledsimerroff))
-	--¿ª¹ØÖµ·¢Éú±ä»¯ »òÕßÆäËû²ÎÊı·¢Éú±ä»¯
-	if c1 or c2 or c3 or c4 then
-		local oldledflg = ledflg
-		ledflg = v
-		--¿ªÆô
-		if v then
-			ledpin,ledvalid,ledidleon,ledidleoff,ledcregon,ledcregoff = pin or ledpin,valid or ledvalid,idleon or ledidleon,idleoff or ledidleoff,cregon or ledcregon,cregoff or ledcregoff
-			ledcgatton,ledcgattoff,ledsckon,ledsckoff = cgatton or ledcgatton,cgattoff or ledcgattoff,sckon or ledsckon,sckoff or ledsckoff
-			ledflymodeon,ledflymodeoff,ledsimerron,ledsimerroff = flymodeon or ledflymodeon,flymodeoff or ledflymodeoff,simerron or ledsimerron,simerroff or ledsimerroff
-			if not oldledflg then pio.pin.setdir(pio.OUTPUT,ledpin) end
-			procled()
-		--¹Ø±Õ
-		else
-			sys.timer_stop(ledblinkon)
-			sys.timer_stop(ledblinkoff)
-			if oldledflg then
-				pio.pin.setval(ledvalid==1 and 0 or 1,ledpin)
-				pio.pin.close(ledpin)
-			end
-			ledstate = "INIT"
-		end		
-	end
-end
-
---±¾Ä£¿é¹Ø×¢µÄÄÚ²¿ÏûÏ¢´¦Àíº¯Êı±í
-local procer =
-{
-	SIM_IND = simind,
-	FLYMODE_IND = flyind,
-	SYS_WORKMODE_IND = workmodeind,
-	USER_SOCKET_CONNECT = usersckind,
-	USER_SOCKETSSL_CONNECT = userscksslind,
-	NET_GPRS_READY = cgattind,
-	CELL_INFO_IND = cellinfoind,
-}
---×¢²áÏûÏ¢´¦Àíº¯Êı±í
-sys.regapp(procer)
---×¢²á+CREGºÍ+CENGÍ¨ÖªµÄ´¦Àíº¯Êı
-ril.regurc("+CREG",neturc)
-ril.regurc("+CENG",neturc)
---×¢²áAT+CCSQºÍAT+CENG?ÃüÁîµÄÓ¦´ğ´¦Àíº¯Êı
-ril.regrsp("+CSQ",rsp)
-ril.regrsp("+CENG",rsp)
---·¢ËÍATÃüÁî
-req("AT+CREG=2")
-req("AT+CREG?")
-req("AT+CENG=1,1")
---8Ãëºó²éÑ¯µÚÒ»´Îcsq
-sys.timer_start(startcsqtimer,8*1000)
-resetcellinfo()
-setled(true)
+--æ³¨å†Œ+CREGå’Œ+CENGé€šçŸ¥çš„å¤„ç†å‡½æ•°
+ril.regUrc("+CREG", neturc)
+ril.regUrc("+CENG", neturc)
+--ril.regUrc("+CRSM", neturc)
+--æ³¨å†ŒAT+CCSQå’ŒAT+CENG?å‘½ä»¤çš„åº”ç­”å¤„ç†å‡½æ•°
+ril.regRsp("+CSQ", rsp)
+ril.regRsp("+CENG", rsp)
+ril.regRsp("+CFUN", rsp)-- é£è¡Œæ¨¡å¼
+--å‘é€ATå‘½ä»¤
+ril.request("AT+CREG=2")
+ril.request("AT+CREG?")
+ril.request("AT+CENG=1,1")
+--é‡ç½®å½“å‰å°åŒºå’Œä¸´è¿‘å°åŒºä¿¡æ¯è¡¨
+resetCellInfo()

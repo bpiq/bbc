@@ -1,1083 +1,134 @@
---[[
-Ä£¿éÃû³Æ£ºÊı¾İÁ´Â·¡¢SOCKET¹ÜÀí
-Ä£¿é¹¦ÄÜ£ºÊı¾İÍøÂç¼¤»î£¬SOCKETµÄ´´½¨¡¢Á¬½Ó¡¢Êı¾İÊÕ·¢¡¢×´Ì¬Î¬»¤
-Ä£¿é×îºóĞŞ¸ÄÊ±¼ä£º2017.02.14
-]]
+--- æ¨¡å—åŠŸèƒ½ï¼šæ•°æ®é“¾è·¯æ¿€æ´»(åˆ›å»ºã€è¿æ¥ã€çŠ¶æ€ç»´æŠ¤)
+-- @module link
+-- @author openLuat
+-- @license MIT
+-- @copyright openLuat
+-- @release 2017.9.20
 
---¶¨ÒåÄ£¿é,µ¼ÈëÒÀÀµ¿â
-local base = _G
-local string = require"string"
-local table = require"table"
-local sys = require"sys"
-local ril = require"ril"
-local net = require"net"
-local rtos = require"rtos"
-local sim = require"sim"
-module(...,package.seeall)
+require"net"
 
---¼ÓÔØ³£ÓÃµÄÈ«¾Öº¯ÊıÖÁ±¾µØ
-local print = base.print
-local pairs = base.pairs
-local tonumber = base.tonumber
-local tostring = base.tostring
-local req = ril.request
+module(..., package.seeall)
 
---×î´ósocket id£¬´Ó0¿ªÊ¼£¬ËùÒÔÍ¬Ê±Ö§³ÖµÄsocketÁ¬½ÓÊıÊÇ8¸ö
-local MAXLINKS = 7
---IP»·¾³½¨Á¢Ê§°ÜÊ±¼ä¸ô5ÃëÖØÁ¬
-local IPSTART_INTVL = 5000
+local publish = sys.publish
+local request = ril.request
+local ready = false
+local gprsAttached
 
---socketÁ¬½Ó±í
-local linklist = {}
---ipstatus£ºIP»·¾³×´Ì¬
---shuting£ºÊÇ·ñÕıÔÚ¹Ø±ÕÊı¾İÍøÂç
-local ipstatus,shuting = "IP INITIAL"
---GPRSÊı¾İÍøÂç¸½×Å×´Ì¬£¬"1"¸½×Å£¬ÆäÓàÎ´¸½×Å
-local cgatt
-local DEFAULT_APN = "CMIOT"
---apn£¬ÓÃ»§Ãû£¬ÃÜÂë
-local apnname = DEFAULT_APN
-local username=''
-local password=''
---socket·¢ÆğÁ¬½ÓÇëÇóºó£¬Èç¹ûÔÚconnectnoretintervalºÁÃëºóÃ»ÓĞÈÎºÎÓ¦´ğ£¬Èç¹ûconnectnoretrestartÎªtrue£¬Ôò»áÖØÆôÈí¼ş
-local connectnoretrestart = false
-local connectnoretinterval
---apnflg£º±¾¹¦ÄÜÄ£¿éÊÇ·ñ×Ô¶¯»ñÈ¡apnĞÅÏ¢£¬trueÊÇ£¬falseÔòÓÉÓÃ»§Ó¦ÓÃ½Å±¾×Ô¼ºµ÷ÓÃsetapn½Ó¿ÚÉèÖÃapn¡¢ÓÃ»§ÃûºÍÃÜÂë
---checkciicrtm£ºÖ´ĞĞAT+CIICRºó£¬Èç¹ûÉèÖÃÁËcheckciicrtm£¬checkciicrtmºÁÃëºó£¬Ã»ÓĞ¼¤»î³É¹¦£¬ÔòÖØÆôÈí¼ş£¨ÖĞÍ¾Ö´ĞĞAT+CIPSHUTÔò²»ÔÙÖØÆô£©
---flymode£ºÊÇ·ñ´¦ÓÚ·ÉĞĞÄ£Ê½
---updating£ºÊÇ·ñÕıÔÚÖ´ĞĞÔ¶³ÌÉı¼¶¹¦ÄÜ(update.lua)
---dbging£ºÊÇ·ñÕıÔÚÖ´ĞĞdbg¹¦ÄÜ(dbg.lua)
---ntping£ºÊÇ·ñÕıÔÚÖ´ĞĞNTPÊ±¼äÍ¬²½¹¦ÄÜ(ntp.lua)
---shutpending£ºÊÇ·ñÓĞµÈ´ı´¦ÀíµÄ½øÈëAT+CIPSHUTÇëÇó
-local apnflag,checkciicrtm,ciicrerrcb,flymode,updating,dbging,ntping,shutpending=true
+function isReady() return ready end
 
---[[
-º¯ÊıÃû£ºsetapn
-¹¦ÄÜ  £ºÉèÖÃapn¡¢ÓÃ»§ÃûºÍÃÜÂë
-²ÎÊı  £º
-		a£ºapn
-		b£ºÓÃ»§Ãû
-		c£ºÃÜÂë
-·µ»ØÖµ£ºÎŞ
-]]
-function setapn(a,b,c)
-	apnname,username,password = a,b or '',c or ''
-	apnflag=false
+-- apnï¼Œç”¨æˆ·åï¼Œå¯†ç 
+local apnname, username, password
+local dnsIP
+--å‘é€æ¨¡å¼
+--0ï¼šæ…¢å‘
+--1ï¼šå¿«å‘
+local sendMode = 0
+
+function setAPN(apn, user, pwd)
+    apnname, username, password = apn, user, pwd
 end
 
---[[
-º¯ÊıÃû£ºgetapn
-¹¦ÄÜ  £º»ñÈ¡apn
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºapn
-]]
-function getapn()
-	return apnname
+function setDnsIP(ip1,ip2)
+    dnsIP = "\""..(ip1 or "").."\",\""..(ip2 or "").."\""
 end
 
---[[
-º¯ÊıÃû£ºconnectingtimerfunc
-¹¦ÄÜ  £ºsocketÁ¬½Ó³¬Ê±Ã»ÓĞÓ¦´ğ´¦Àíº¯Êı
-²ÎÊı  £º
-		id£ºsocket id
-·µ»ØÖµ£ºÎŞ
-]]
-local function connectingtimerfunc(id)
-	print("connectingtimerfunc",id,connectnoretrestart)
-	if connectnoretrestart then
-		sys.restart("link.connectingtimerfunc")
-	end
-end
-
---[[
-º¯ÊıÃû£ºstopconnectingtimer
-¹¦ÄÜ  £º¹Ø±Õ¡°socketÁ¬½Ó³¬Ê±Ã»ÓĞÓ¦´ğ¡±¶¨Ê±Æ÷
-²ÎÊı  £º
-		id£ºsocket id
-·µ»ØÖµ£ºÎŞ
-]]
-local function stopconnectingtimer(id)
-	print("stopconnectingtimer",id)
-	sys.timer_stop(connectingtimerfunc,id)
-end
-
---[[
-º¯ÊıÃû£ºstartconnectingtimer
-¹¦ÄÜ  £º¿ªÆô¡°socketÁ¬½Ó³¬Ê±Ã»ÓĞÓ¦´ğ¡±¶¨Ê±Æ÷
-²ÎÊı  £º
-		id£ºsocket id
-·µ»ØÖµ£ºÎŞ
-]]
-local function startconnectingtimer(id)
-	print("startconnectingtimer",id,connectnoretrestart,connectnoretinterval)
-	if id and connectnoretrestart and connectnoretinterval and connectnoretinterval > 0 then
-		sys.timer_start(connectingtimerfunc,connectnoretinterval,id)
-	end
-end
-
---[[
-º¯ÊıÃû£ºsetconnectnoretrestart
-¹¦ÄÜ  £ºÉèÖÃ¡°socketÁ¬½Ó³¬Ê±Ã»ÓĞÓ¦´ğ¡±µÄ¿ØÖÆ²ÎÊı
-²ÎÊı  £º
-		flag£º¹¦ÄÜ¿ª¹Ø£¬true»òÕßfalse
-		interval£º³¬Ê±Ê±¼ä£¬µ¥Î»ºÁÃë
-·µ»ØÖµ£ºÎŞ
-]]
-function setconnectnoretrestart(flag,interval)
-	connectnoretrestart = flag
-	connectnoretinterval = interval
-end
-
---[[
-º¯ÊıÃû£ºsetupIP
-¹¦ÄÜ  £º·¢ËÍ¼¤»îIPÍøÂçÇëÇó
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-function setupIP()
-	print("link.setupIP:",ipstatus,cgatt,flymode)
-	--Êı¾İÍøÂçÒÑ¼¤»î»òÕß´¦ÓÚ·ÉĞĞÄ£Ê½£¬Ö±½Ó·µ»Ø
-	if ipstatus ~= "IP INITIAL" or flymode then
-		return
-	end
-	--gprsÊı¾İÍøÂçÃ»ÓĞ¸½×ÅÉÏ
-	if cgatt ~= "1" then
-		print("setupip: wait cgatt")
-		return
-	end
-
-	--¼¤»îIPÍøÂçÇëÇó
-	req("AT+CSTT=\""..apnname..'\",\"'..username..'\",\"'..password.. "\"")
-	req("AT+CIICR")
-	--²éÑ¯¼¤»î×´Ì¬
-	req("AT+CIPSTATUS")
-	ipstatus = "IP START"
-end
-
---[[
-º¯ÊıÃû£ºemptylink
-¹¦ÄÜ  £º»ñÈ¡¿ÉÓÃµÄsocket id
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£º¿ÉÓÃµÄsocket id£¬Èç¹ûÃ»ÓĞ¿ÉÓÃµÄ·µ»Ønil
-]]
-local function emptylink()
-	for i = 0,MAXLINKS do
-		if linklist[i] == nil then
-			return i
-		end
-	end
-
-	return nil
-end
-
---[[
-º¯ÊıÃû£ºvalidaction
-¹¦ÄÜ  £º¼ì²éÄ³¸ösocket idµÄ¶¯×÷ÊÇ·ñÓĞĞ§
-²ÎÊı  £º
-		id£ºsocket id
-		action£º¶¯×÷
-·µ»ØÖµ£ºtrueÓĞĞ§£¬falseÎŞĞ§
-]]
-local function validaction(id,action)
-	--socketÎŞĞ§
-	if linklist[id] == nil then
-		print("link.validaction:id nil",id)
-		return false
-	end
-
-	--Í¬Ò»¸ö×´Ì¬²»ÖØ¸´Ö´ĞĞ
-	if action.."ING" == linklist[id].state then
-		print("link.validaction:",action,linklist[id].state)
-		return false
-	end
-
-	local ing = string.match(linklist[id].state,"(ING)",-3)
-
-	if ing then
-		--ÓĞÆäËûÈÎÎñÔÚ´¦ÀíÊ±,²»ÔÊĞí´¦ÀíÁ¬½Ó,¶ÏÁ´»òÕß¹Ø±ÕÊÇ¿ÉÒÔµÄ
-		if action == "CONNECT" then
-			print("link.validaction: action running",linklist[id].state,action)
-			return false
-		end
-	end
-
-	-- ÎŞÆäËûÈÎÎñÔÚÖ´ĞĞ,ÔÊĞíÖ´ĞĞ
-	return true
-end
-
---[[
-º¯ÊıÃû£ºopenid
-¹¦ÄÜ  £º±£´æsocketµÄ²ÎÊıĞÅÏ¢
-²ÎÊı  £º
-		id£ºsocket id
-		notify£ºsocket×´Ì¬´¦Àíº¯Êı
-		recv£ºsocketÊı¾İ½ÓÊÕ´¦Àíº¯Êı
-		tag£ºsocket´´½¨±ê¼Ç
-·µ»ØÖµ£ºtrue³É¹¦£¬falseÊ§°Ü
-]]
-function openid(id,notify,recv,tag)
-	--idÔ½½ç»òÕßidµÄsocketÒÑ¾­´æÔÚ
-	if id > MAXLINKS or linklist[id] ~= nil then
-		print("openid:error",id)
-		return false
-	end
-
-	local link = {
-		notify = notify,
-		recv = recv,
-		state = "INITIAL",
-		tag = tag,
-	}
-
-	linklist[id] = link
-
-	--×¢²áÁ¬½Óurc
-	ril.regurc(tostring(id),urc)
-
-	--¼¤»îIPÍøÂç
-	if ipstatus ~= "IP STATUS" and ipstatus ~= "IP PROCESSING" then
-		setupIP()
-	end
-
-	return true
-end
-
---[[
-º¯ÊıÃû£ºopen
-¹¦ÄÜ  £º´´½¨Ò»¸ösocket
-²ÎÊı  £º
-		notify£ºsocket×´Ì¬´¦Àíº¯Êı
-		recv£ºsocketÊı¾İ½ÓÊÕ´¦Àíº¯Êı
-		tag£ºsocket´´½¨±ê¼Ç
-·µ»ØÖµ£ºnumberÀàĞÍµÄid±íÊ¾³É¹¦£¬nil±íÊ¾Ê§°Ü
-]]
-function open(notify,recv,tag)
-	local id = emptylink()
-
-	if id == nil then
-		return nil,"no empty link"
-	end
-
-	openid(id,notify,recv,tag)
-
-	return id
-end
-
---[[
-º¯ÊıÃû£ºclose
-¹¦ÄÜ  £º¹Ø±ÕÒ»¸ösocket£¨»áÇå³ısocketµÄËùÓĞ²ÎÊıĞÅÏ¢£©
-²ÎÊı  £º
-		id£ºsocket id
-·µ»ØÖµ£ºtrue³É¹¦£¬falseÊ§°Ü
-]]
-function close(id)
-	--¼ì²éÊÇ·ñÔÊĞí¹Ø±Õ
-	if validaction(id,"CLOSE") == false then
-		return false
-	end
-	--ÕıÔÚ¹Ø±Õ
-	linklist[id].state = "CLOSING"
-	--·¢ËÍATÃüÁî¹Ø±ÕÇëÇó
-	req("AT+CIPCLOSE="..id)
-
-	return true
-end
-
---[[
-º¯ÊıÃû£ºasyncLocalEvent
-¹¦ÄÜ  £ºsocketÒì²½Í¨ÖªÏûÏ¢µÄ´¦Àíº¯Êı
-²ÎÊı  £º
-		msg£ºÒì²½Í¨ÖªÏûÏ¢"LINK_ASYNC_LOCAL_EVENT"
-		cbfunc£ºÏûÏ¢»Øµ÷
-		id£ºsocket id
-		val£ºÍ¨ÖªÏûÏ¢µÄ²ÎÊı
-·µ»ØÖµ£ºtrue³É¹¦£¬falseÊ§°Ü
-]]
-function asyncLocalEvent(msg,cbfunc,id,val)
-	cbfunc(id,val)
-end
-
---×¢²áÏûÏ¢LINK_ASYNC_LOCAL_EVENTµÄ´¦Àíº¯Êı
-sys.regapp(asyncLocalEvent,"LINK_ASYNC_LOCAL_EVENT")
-
---[[
-º¯ÊıÃû£ºconnect
-¹¦ÄÜ  £ºsocketÁ¬½Ó·şÎñÆ÷ÇëÇó
-²ÎÊı  £º
-		id£ºsocket id
-		protocol£º´«Êä²ãĞ­Òé£¬TCP»òÕßUDP
-		address£º·şÎñÆ÷µØÖ·
-		port£º·şÎñÆ÷¶Ë¿Ú
-·µ»ØÖµ£ºÇëÇó³É¹¦Í¬²½·µ»Øtrue£¬·ñÔòfalse£»
-]]
-function connect(id,protocol,address,port)
-	--²»ÔÊĞí·¢ÆğÁ¬½Ó¶¯×÷
-	if validaction(id,"CONNECT") == false or linklist[id].state == "CONNECTED" then
-		return false
-	end
-	print("link.connect",id,protocol,address,port,ipstatus,shuting,shutpending)
-
-	linklist[id].state = "CONNECTING"
-
-	if cc and cc.anycallexist() then
-		--Èç¹û´ò¿ªÁËÍ¨»°¹¦ÄÜ ²¢ÇÒµ±Ç°ÕıÔÚÍ¨»°ÖĞÊ¹ÓÃÒì²½Í¨ÖªÁ¬½ÓÊ§°Ü
-		print("link.connect:failed cause call exist")
-		sys.dispatch("LINK_ASYNC_LOCAL_EVENT",statusind,id,"CONNECT FAIL")
-		return true
-	end
-
-	local connstr = string.format("AT+CIPSTART=%d,\"%s\",\"%s\",%s",id,protocol,address,port)
-
-	if (ipstatus ~= "IP STATUS" and ipstatus ~= "IP PROCESSING") or shuting or shutpending then
-		--ip»·¾³Î´×¼±¸ºÃÏÈ¼ÓÈëµÈ´ı
-		linklist[id].pending = connstr
-	else
-		--·¢ËÍATÃüÁîÁ¬½Ó·şÎñÆ÷
-		req(connstr)
-		startconnectingtimer(id)
-	end
-
-	return true
-end
-
---[[
-º¯ÊıÃû£ºdisconnect
-¹¦ÄÜ  £º¶Ï¿ªÒ»¸ösocket£¨²»»áÇå³ısocketµÄËùÓĞ²ÎÊıĞÅÏ¢£©
-²ÎÊı  £º
-		id£ºsocket id
-·µ»ØÖµ£ºtrue³É¹¦£¬falseÊ§°Ü
-]]
-function disconnect(id)
-	--²»ÔÊĞí¶Ï¿ª¶¯×÷
-	if validaction(id,"DISCONNECT") == false then
-		return false
-	end
-	--Èç¹û´Ësocket id¶ÔÓ¦µÄÁ¬½Ó»¹ÔÚµÈ´ıÖĞ£¬²¢Ã»ÓĞÕæÕı·¢Æğ
-	if linklist[id].pending then
-		linklist[id].pending = nil
-		if ipstatus ~= "IP STATUS" and ipstatus ~= "IP PROCESSING" and linklist[id].state == "CONNECTING" then
-			print("link.disconnect: ip not ready",ipstatus)
-			linklist[id].state = "DISCONNECTING"
-			sys.dispatch("LINK_ASYNC_LOCAL_EVENT",closecnf,id,"DISCONNECT","OK")
-			return
-		end
-	end
-
-	linklist[id].state = "DISCONNECTING"
-	--·¢ËÍATÃüÁî¶Ï¿ª
-	req("AT+CIPCLOSE="..id)
-
-	return true
-end
-
---[[
-º¯ÊıÃû£ºsend
-¹¦ÄÜ  £º·¢ËÍÊı¾İµ½·şÎñÆ÷
-²ÎÊı  £º
-		id£ºsocket id
-		data£ºÒª·¢ËÍµÄÊı¾İ
-·µ»ØÖµ£ºtrue³É¹¦£¬falseÊ§°Ü
-]]
-function send(id,data)
-	--socketÎŞĞ§£¬»òÕßsocketÎ´Á¬½Ó
-	if linklist[id] == nil or linklist[id].state ~= "CONNECTED" then
-		print("link.send:error",id)
-		return false
-	end
-
-	if cc and cc.anycallexist() then
-		-- Èç¹û´ò¿ªÁËÍ¨»°¹¦ÄÜ ²¢ÇÒµ±Ç°ÕıÔÚÍ¨»°ÖĞÊ¹ÓÃÒì²½Í¨ÖªÁ¬½ÓÊ§°Ü
-		print("link.send:failed cause call exist")
-		return false
-	end
-	--·¢ËÍATÃüÁîÖ´ĞĞÊı¾İ·¢ËÍ
-	req(string.format("AT+CIPSEND=%d,%d",id,string.len(data)),data)
-
-	return true
-end
-
---[[
-º¯ÊıÃû£ºgetstate
-¹¦ÄÜ  £º»ñÈ¡Ò»¸ösocketµÄÁ¬½Ó×´Ì¬
-²ÎÊı  £º
-		id£ºsocket id
-·µ»ØÖµ£ºsocketÓĞĞ§Ôò·µ»ØÁ¬½Ó×´Ì¬£¬·ñÔò·µ»Ø"NIL LINK"
-]]
-function getstate(id)
-	return linklist[id] and linklist[id].state or "NIL LINK"
-end
-
---[[
-º¯ÊıÃû£ºrecv
-¹¦ÄÜ  £ºÄ³¸ösocketµÄÊı¾İ½ÓÊÕ´¦Àíº¯Êı
-²ÎÊı  £º
-		id£ºsocket id
-		len£º½ÓÊÕµ½µÄÊı¾İ³¤¶È£¬ÒÔ×Ö½ÚÎªµ¥Î»
-		data£º½ÓÊÕµ½µÄÊı¾İÄÚÈİ
-·µ»ØÖµ£ºÎŞ
-]]
-local function recv(id,len,data)
-	--socket idÎŞĞ§
-	if linklist[id] == nil then
-		print("link.recv:error",id)
-		return
-	end
-	--µ÷ÓÃsocket id¶ÔÓ¦µÄÓÃ»§×¢²áµÄÊı¾İ½ÓÊÕ´¦Àíº¯Êı
-	if linklist[id].recv then
-		linklist[id].recv(id,data)
-	else
-		print("link.recv:nil recv",id)
-	end
-end
-
---[[ ipstatus²éÑ¯·µ»ØµÄ×´Ì¬²»ÌáÊ¾
-function linkstatus(data)
-end
-]]
-
---[[
-º¯ÊıÃû£ºusersckisactive
-¹¦ÄÜ  £ºÅĞ¶ÏÓÃ»§´´½¨µÄsocketÁ¬½ÓÊÇ·ñ´¦ÓÚ¼¤»î×´Ì¬
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÖ»ÒªÈÎºÎÒ»¸öÓÃ»§socket´¦ÓÚÁ¬½Ó×´Ì¬¾Í·µ»Øtrue£¬·ñÔò·µ»Ønil
-]]
-local function usersckisactive()
-	for i = 0,MAXLINKS do
-		--ÓÃ»§×Ô¶¨ÒåµÄsocket£¬Ã»ÓĞtagÖµ
-		if linklist[i] and not linklist[i].tag and linklist[i].state=="CONNECTED" then
-			return true
-		end
-	end
-end
-
---[[
-º¯ÊıÃû£ºusersckntfy
-¹¦ÄÜ  £ºÓÃ»§´´½¨µÄsocketÁ¬½Ó×´Ì¬±ä»¯Í¨Öª
-²ÎÊı  £º
-		id£ºsocket id
-·µ»ØÖµ£ºÎŞ
-]]
-local function usersckntfy(id)
-	--²úÉúÒ»¸öÄÚ²¿ÏûÏ¢"USER_SOCKET_CONNECT"£¬Í¨Öª¡°ÓÃ»§´´½¨µÄsocketÁ¬½Ó×´Ì¬·¢Éú±ä»¯¡±
-	if not linklist[id].tag then sys.dispatch("USER_SOCKET_CONNECT",usersckisactive()) end
-end
-
---[[
-º¯ÊıÃû£ºsendcnf
-¹¦ÄÜ  £ºsocketÊı¾İ·¢ËÍ½á¹ûÈ·ÈÏ
-²ÎÊı  £º
-		id£ºsocket id
-		result£º·¢ËÍ½á¹û×Ö·û´®
-·µ»ØÖµ£ºÎŞ
-]]
-local function sendcnf(id,result)
-	local str = string.match(result,"([%u ])")
-	--·¢ËÍÊ§°Ü
-	if str == "TCP ERROR" or str == "UDP ERROR" or str == "ERROR" then
-		linklist[id].state = result
-	end
-	--µ÷ÓÃÓÃ»§×¢²áµÄ×´Ì¬´¦Àíº¯Êı
-	linklist[id].notify(id,"SEND",result)
-end
-
---[[
-º¯ÊıÃû£ºclosecnf
-¹¦ÄÜ  £ºsocket¹Ø±Õ½á¹ûÈ·ÈÏ
-²ÎÊı  £º
-		id£ºsocket id
-		result£º¹Ø±Õ½á¹û×Ö·û´®
-·µ»ØÖµ£ºÎŞ
-]]
-function closecnf(id,result)
-	--socket idÎŞĞ§
-	if not id or not linklist[id] then
-		print("link.closecnf:error",id)
-		return
-	end
-	--²»¹ÜÈÎºÎµÄclose½á¹û,Á´½Ó×ÜÊÇ³É¹¦¶Ï¿ªÁË,ËùÒÔÖ±½Ó°´ÕÕÁ´½Ó¶Ï¿ª´¦Àí
-	if linklist[id].state == "DISCONNECTING" then
-		linklist[id].state = "CLOSED"
-		linklist[id].notify(id,"DISCONNECT","OK")
-		usersckntfy(id,false)
-		stopconnectingtimer(id)
-	--Á¬½Ó×¢Ïú,Çå³ıÎ¬»¤µÄÁ¬½ÓĞÅÏ¢,Çå³ıurc¹Ø×¢
-	elseif linklist[id].state == "CLOSING" then		
-		local tlink = linklist[id]
-		usersckntfy(id,false)
-		linklist[id] = nil
-		ril.deregurc(tostring(id),urc)
-		tlink.notify(id,"CLOSE","OK")		
-		stopconnectingtimer(id)
-	else
-		print("link.closecnf:error",linklist[id].state)
-	end
-end
-
---[[
-º¯ÊıÃû£ºstatusind
-¹¦ÄÜ  £ºsocket×´Ì¬×ª»¯´¦Àí
-²ÎÊı  £º
-		id£ºsocket id
-		state£º×´Ì¬×Ö·û´®
-·µ»ØÖµ£ºÎŞ
-]]
-function statusind(id,state)
-	--socketÎŞĞ§
-	if linklist[id] == nil then
-		print("link.statusind:nil id",id)
-		return
-	end
-
-	--¿ì·¢Ä£Ê½ÏÂ£¬Êı¾İ·¢ËÍÊ§°Ü
-	if state == "SEND FAIL" then
-		if linklist[id].state == "CONNECTED" then
-			linklist[id].notify(id,"SEND",state)
-		else
-			print("statusind:send fail state",linklist[id].state)
-		end
-		return
-	end
-
-	local evt
-	--socketÈç¹û´¦ÓÚÕıÔÚÁ¬½ÓµÄ×´Ì¬£¬»òÕß·µ»ØÁËÁ¬½Ó³É¹¦µÄ×´Ì¬Í¨Öª
-	if linklist[id].state == "CONNECTING" or state == "CONNECT OK" then
-		--Á¬½ÓÀàĞÍµÄÊÂ¼ş
-		evt = "CONNECT"		
-	else
-		--×´Ì¬ÀàĞÍµÄÊÂ¼ş
-		evt = "STATE"
-	end
-
-	--³ı·ÇÁ¬½Ó³É¹¦,·ñÔòÁ¬½ÓÈÔÈ»»¹ÊÇÔÚ¹Ø±Õ×´Ì¬
-	if state == "CONNECT OK" then
-		linklist[id].state = "CONNECTED"		
-	else
-		linklist[id].state = "CLOSED"
-	end
-	--µ÷ÓÃusersckntfyÅĞ¶ÏÊÇ·ñĞèÒªÍ¨Öª¡°ÓÃ»§socketÁ¬½Ó×´Ì¬·¢Éú±ä»¯¡±
-	usersckntfy(id,state == "CONNECT OK")
-	--µ÷ÓÃÓÃ»§×¢²áµÄ×´Ì¬´¦Àíº¯Êı
-	linklist[id].notify(id,evt,state)
-	stopconnectingtimer(id)
-end
-
---[[
-º¯ÊıÃû£ºconnpend
-¹¦ÄÜ  £ºÖ´ĞĞÒòIPÍøÂçÎ´×¼±¸ºÃ±»¹ÒÆğµÄsocketÁ¬½ÓÇëÇó
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-local function connpend()
-	for i = 0,MAXLINKS do
-		if linklist[i] ~= nil then
-			if linklist[i].pending then
-				req(linklist[i].pending)
-				local id = string.match(linklist[i].pending,"AT%+CIPSTART=(%d)")
-				if id then
-					startconnectingtimer(tonumber(id))
-				end
-				linklist[i].pending = nil
-			end
-		end
-	end	
-end
-
-local ipstatusind
-function regipstatusind()
-	ipstatusind = true
-end
-
-local function ciicrerrtmfnc()
-	print("ciicrerrtmfnc")
-	if ciicrerrcb then
-		ciicrerrcb()
-	else
-		sys.restart("ciicrerrtmfnc")
-	end
-end
-
---[[
-º¯ÊıÃû£ºsetIPStatus
-¹¦ÄÜ  £ºÉèÖÃIPÍøÂç×´Ì¬
-²ÎÊı  £º
-		status£ºIPÍøÂç×´Ì¬
-·µ»ØÖµ£ºÎŞ
-]]
-local function setIPStatus(status)
-	print("ipstatus:",status)
-	
-	if ipstatusind and ipstatus~=status then
-		sys.dispatch("IP_STATUS_IND",status=="IP GPRSACT" or status=="IP PROCESSING" or status=="IP STATUS")
-	end
-	
-	if not sim.getstatus() then
-		status = "IP INITIAL"
-	end
-
-	if ipstatus ~= status or status=="IP START" or status == "IP CONFIG" or status == "IP GPRSACT" or status == "PDP DEACT" then
-		if status=="IP GPRSACT" and checkciicrtm then
-			--¹Ø±Õ¡°AT+CIICRºó£¬IPÍøÂç³¬Ê±Î´¼¤»î³É¹¦¡±µÄ¶¨Ê±Æ÷
-			print("ciicrerrtmfnc stop")
-			sys.timer_stop(ciicrerrtmfnc)
-		end
-		ipstatus = status
-		if ipstatus == "IP PROCESSING" then
-		--IPÍøÂç×¼±¸¾ÍĞ÷
-		elseif ipstatus == "IP STATUS" then
-			--Ö´ĞĞ±»¹ÒÆğµÄsocketÁ¬½ÓÇëÇó
-			connpend()
-		--IPÍøÂç¹Ø±Õ
-		elseif ipstatus == "IP INITIAL" then
-			--IPSTART_INTVLºÁÃëºó£¬ÖØĞÂ¼¤»îIPÍøÂç
-			sys.timer_start(setupIP,IPSTART_INTVL)
-		--IPÍøÂç¼¤»îÖĞ
-		elseif ipstatus == "IP CONFIG" or ipstatus == "IP START" then
-			--2ÃëÖÓ²éÑ¯Ò»´ÎIPÍøÂç×´Ì¬
-			sys.timer_start(req,2000,"AT+CIPSTATUS")
-		--IPÍøÂç¼¤»î³É¹¦
-		elseif ipstatus == "IP GPRSACT" then
-			--»ñÈ¡IPµØÖ·£¬µØÖ·»ñÈ¡³É¹¦ºó£¬IPÍøÂç×´Ì¬»áÇĞ»»Îª"IP STATUS"
-			req("AT+CIFSR")
-			--²éÑ¯IPÍøÂç×´Ì¬
-			req("AT+CIPSTATUS")
-		else --ÆäËûÒì³£×´Ì¬¹Ø±ÕÖÁIP INITIAL
-			shut()
-			sys.timer_stop(req,"AT+CIPSTATUS")
-		end
-	end
-end
-
---[[
-º¯ÊıÃû£ºshutcnf
-¹¦ÄÜ  £º¹Ø±ÕIPÍøÂç½á¹û´¦Àí
-²ÎÊı  £º
-		result£º¹Ø±Õ½á¹û×Ö·û´®
-·µ»ØÖµ£ºÎŞ
-]]
-local function shutcnf(result)
-	shuting = false
-	if ipstatusind then sys.dispatch("IP_SHUTING_IND",false) end
-	--¹Ø±Õ³É¹¦
-	if result == "SHUT OK" or not sim.getstatus() then
-		setIPStatus("IP INITIAL")
-		--¶Ï¿ªËùÓĞsocketÁ¬½Ó£¬²»Çå³ısocket²ÎÊıĞÅÏ¢
-		for i = 0,MAXLINKS do
-			if linklist[i] then
-				if linklist[i].state == "CONNECTING" and linklist[i].pending then
-					-- ¶ÔÓÚÉĞÎ´½øĞĞ¹ıµÄÁ¬½ÓÇëÇó ²»ÌáÊ¾close,IP»·¾³½¨Á¢ºó×Ô¶¯Á¬½Ó
-				elseif linklist[i].state == "INITIAL" then -- Î´Á¬½ÓµÄÒ²²»ÌáÊ¾
-				else
-					linklist[i].state = "CLOSED"
-					linklist[i].notify(i,"STATE","SHUTED")
-					usersckntfy(i,false)
-				end
-				stopconnectingtimer(i)
-			end
-		end
-	else
-		--req("AT+CIPSTATUS")
-		sys.timer_start(req,10000,"AT+CIPSTATUS")
-	end
-	if checkciicrtm and result=="SHUT OK" and not ciicrerrcb then
-		--¹Ø±Õ¡°AT+CIICRºó£¬IPÍøÂç³¬Ê±Î´¼¤»î³É¹¦¡±µÄ¶¨Ê±Æ÷
-		print("ciicrerrtmfnc stop")
-		sys.timer_stop(ciicrerrtmfnc)
-	end
-end
---[[
-local function reconnip(force)
-	print("link.reconnip",force,ipstatus,cgatt)
-	if force then
-		setIPStatus("PDP DEACT")
-	else
-		if ipstatus == "IP START" or ipstatus == "IP CONFIG" or ipstatus == "IP GPRSACT" or ipstatus == "IP STATUS" or ipstatus == "IP PROCESSING" then
-			setIPStatus("PDP DEACT")
-		end
-		cgatt = "0"
-	end
-end
-]]
-
---Î¬»¤´ÓATÍ¨µÀÊÕµ½µÄÒ»´Î¡°Ä³¸ösocket´Ó·şÎñÆ÷½ÓÊÕµ½µÄÊı¾İ¡±
---id£ºsocket id
---len£ºÕâ´ÎÊÕµ½µÄÊı¾İ×Ü³¤¶È
---data£ºÒÑ¾­ÊÕµ½µÄÊı¾İÄÚÈİ
-local rcvd = {id = 0,len = 0,rcvLen = 0,data = {}}
-
---[[
-º¯ÊıÃû£ºrcvdfilter
-¹¦ÄÜ  £º´ÓATÍ¨µÀÊÕÈ¡Ò»°üÊı¾İ
-²ÎÊı  £º
-		data£º½âÎöµ½µÄÊı¾İ
-·µ»ØÖµ£ºÁ½¸ö·µ»ØÖµ£¬µÚÒ»¸ö·µ»ØÖµ±íÊ¾Î´´¦ÀíµÄÊı¾İ£¬µÚ¶ş¸ö·µ»ØÖµ±íÊ¾ATÍ¨µÀµÄÊı¾İ¹ıÂËÆ÷º¯Êı
-]]
-local function rcvdfilter(data)
-	--Èç¹û×Ü³¤¶ÈÎª0£¬Ôò±¾º¯Êı²»´¦ÀíÊÕµ½µÄÊı¾İ£¬Ö±½Ó·µ»Ø
-	if rcvd.len == 0 then
-		return data
-	end
-	--Ê£ÓàÎ´ÊÕµ½µÄÊı¾İ³¤¶È
-	local restlen = rcvd.len - rcvd.rcvLen
-	if  string.len(data) > restlen then -- atÍ¨µÀµÄÄÚÈİ±ÈÊ£ÓàÎ´ÊÕµ½µÄÊı¾İ¶à
-		-- ½ØÈ¡ÍøÂç·¢À´µÄÊı¾İ
-		table.insert(rcvd.data,string.sub(data,1,restlen))
-		rcvd.rcvLen = rcvd.rcvLen+restlen
-		-- Ê£ÏÂµÄÊı¾İÈÔ°´at½øĞĞºóĞø´¦Àí
-		data = string.sub(data,restlen+1,-1)
-	else
-		table.insert(rcvd.data,data)
-		rcvd.rcvLen = rcvd.rcvLen+data:len()
-		data = ""
-	end
-
-	if rcvd.len == rcvd.rcvLen then
-		--Í¨Öª½ÓÊÕÊı¾İ
-		recv(rcvd.id,rcvd.len,table.concat(rcvd.data))
-		rcvd.id = 0
-		rcvd.len = 0
-		rcvd.rcvLen = 0
-		rcvd.data = {}
-		return data
-	else
-		return data, rcvdfilter
-	end
-end
-
---[[
-º¯ÊıÃû£ºurc
-¹¦ÄÜ  £º±¾¹¦ÄÜÄ£¿éÄÚ¡°×¢²áµÄµ×²ãcoreÍ¨¹ıĞéÄâ´®¿ÚÖ÷¶¯ÉÏ±¨µÄÍ¨Öª¡±µÄ´¦Àí
-²ÎÊı  £º
-		data£ºÍ¨ÖªµÄÍêÕû×Ö·û´®ĞÅÏ¢
-		prefix£ºÍ¨ÖªµÄÇ°×º
-·µ»ØÖµ£ºÎŞ
-]]
-function urc(data,prefix)
-	--IPÍøÂç×´Ì¬Í¨Öª
-	if prefix == "STATE" then
-		setIPStatus(string.sub(data,8,-1))
-	elseif prefix == "C" then
-		--linkstatus(data)
-	--IPÍøÂç±»¶¯µÄÈ¥¼¤»î
-	elseif prefix == "+PDP" then
-		--req("AT+CIPSTATUS")
-		shut()
-		sys.timer_stop(req,"AT+CIPSTATUS")
-	--socketÊÕµ½·şÎñÆ÷·¢¹ıÀ´µÄÊı¾İ
-	elseif prefix == "+RECEIVE" then
-		local lid,len = string.match(data,",(%d),(%d+)",string.len("+RECEIVE")+1)
-		rcvd.id = tonumber(lid)
-		rcvd.len = tonumber(len)
-		return rcvdfilter,rcvd.len
-	--socket×´Ì¬Í¨Öª
-	else
-		local lid,lstate = string.match(data,"(%d), *([%u :%d]+)")
-
-		if lid then
-			lid = tonumber(lid)
-			statusind(lid,lstate)
-		end
-	end
-end
-
---[[
-º¯ÊıÃû£ºshut
-¹¦ÄÜ  £º¹Ø±ÕIPÍøÂç
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
 function shut()
-	--Èç¹ûÕıÔÚÖ´ĞĞÔ¶³ÌÉı¼¶¹¦ÄÜ»òÕßdbg¹¦ÄÜ»òÕßntp¹¦ÄÜ£¬ÔòÑÓ³Ù¹Ø±Õ
-	if updating or dbging or ntping then shutpending = true return end
-	--·¢ËÍATÃüÁî¹Ø±Õ
-	req("AT+CIPSHUT")
-	--ÉèÖÃ¹Ø±ÕÖĞ±êÖ¾
-	shuting = true
-	if ipstatusind then sys.dispatch("IP_SHUTING_IND",true) end
-	shutpending = false
-end
-reset = shut
-
---[[
-º¯ÊıÃû£ºgetresult
-¹¦ÄÜ  £º½âÎösocket×´Ì¬×Ö·û´®
-²ÎÊı  £º
-		str£ºÍõï£µÄ×´Ì¬×Ö·û´®£¬ÀıÈçERROR¡¢1, SEND OK¡¢1, CLOSE OK
-·µ»ØÖµ£ºsocket×´Ì¬£¬²»°üº¬socket id,ÀıÈçERROR¡¢SEND OK¡¢CLOSE OK
-]]
-local function getresult(str)
-	return str == "ERROR" and str or string.match(str,"%d, *([%u :%d]+)")
+	request('AT+CIPSHUT')
 end
 
---[[
-º¯ÊıÃû£ºrsp
-¹¦ÄÜ  £º±¾¹¦ÄÜÄ£¿éÄÚ¡°Í¨¹ıĞéÄâ´®¿Ú·¢ËÍµ½µ×²ãcoreÈí¼şµÄATÃüÁî¡±µÄÓ¦´ğ´¦Àí
-²ÎÊı  £º
-		cmd£º´ËÓ¦´ğ¶ÔÓ¦µÄATÃüÁî
-		success£ºATÃüÁîÖ´ĞĞ½á¹û£¬true»òÕßfalse
-		response£ºATÃüÁîµÄÓ¦´ğÖĞµÄÖ´ĞĞ½á¹û×Ö·û´®
-		intermediate£ºATÃüÁîµÄÓ¦´ğÖĞµÄÖĞ¼äĞÅÏ¢
-·µ»ØÖµ£ºÎŞ
-]]
-local function rsp(cmd,success,response,intermediate)
-	local prefix = string.match(cmd,"AT(%+%u+)")
-	local id = tonumber(string.match(cmd,"AT%+%u+=(%d)"))
-	--·¢ËÍÊı¾İµ½·şÎñÆ÷µÄÓ¦´ğ
-	if prefix == "+CIPSEND" then
-		if response == "+PDP: DEACT" then
-			req("AT+CIPSTATUS")
-			response = "ERROR"
-		end
-		if string.match(response,"DATA ACCEPT") then
-			sendcnf(id,"SEND OK")
-		else
-			sendcnf(id,getresult(response))
-		end
-	--¹Ø±ÕsocketµÄÓ¦´ğ
-	elseif prefix == "+CIPCLOSE" then
-		closecnf(id,getresult(response))
-	--¹Ø±ÕIPÍøÂçµÄÓ¦´ğ
-	elseif prefix == "+CIPSHUT" then
-		shutcnf(response)
-	--Á¬½Óµ½·şÎñÆ÷µÄÓ¦´ğ
-	elseif prefix == "+CIPSTART" then
-		if response == "ERROR" then
-			statusind(id,"ERROR")
-		end
-	--¼¤»îIPÍøÂçµÄÓ¦´ğ
-	elseif prefix == "+CIICR" then
-		if success then
-			--³É¹¦ºó£¬µ×²ã»áÈ¥¼¤»îIPÍøÂç£¬luaÓ¦ÓÃĞèÒª·¢ËÍAT+CIPSTATUS²éÑ¯IPÍøÂç×´Ì¬
-			if checkciicrtm and not sys.timer_is_active(ciicrerrtmfnc) then
-				--Æô¶¯¡°¼¤»îIPÍøÂç³¬Ê±¡±¶¨Ê±Æ÷
-				print("ciicrerrtmfnc start")
-				sys.timer_start(ciicrerrtmfnc,checkciicrtm)
-			end
-		else
-			shut()
-			sys.timer_stop(req,"AT+CIPSTATUS")
-		end
-	end
-end
+-- SIMå¡ IMSI READYä»¥åè‡ªåŠ¨è®¾ç½®APN
+sys.subscribe("IMSI_READY", function()
+    if not apnname then -- å¦‚æœæœªè®¾ç½®APNè®¾ç½®é»˜è®¤APN
+        local mcc, mnc = tonumber(sim.getMcc(), 16), tonumber(sim.getMnc(), 16)
+        apnname, username, password = apn and apn.get_default_apn(mcc, mnc) -- å¦‚æœå­˜åœ¨APNåº“è‡ªåŠ¨è·å–è¿è¥å•†çš„APN
+        if not apnname or apnname == '' or apnname=="CMNET" then -- é»˜è®¤æƒ…å†µï¼Œå¦‚æœè”é€šå¡è®¾ç½®ä¸ºè”é€šAPN å…¶ä»–éƒ½é»˜è®¤ä¸ºCMIOT
+            apnname = (mcc == 0x460 and (mnc == 0x01 or mnc == 0x06)) and 'UNINET' or 'CMIOT'
+        end
+    end
+    username = username or ''
+    password = password or ''
+end)
 
---×¢²áÒÔÏÂurcÍ¨ÖªµÄ´¦Àíº¯Êı
-ril.regurc("STATE",urc)
-ril.regurc("C",urc)
-ril.regurc("+PDP",urc)
-ril.regurc("+RECEIVE",urc)
---×¢²áÒÔÏÂATÃüÁîµÄÓ¦´ğ´¦Àíº¯Êı
-ril.regrsp("+CIPSTART",rsp)
-ril.regrsp("+CIPSEND",rsp)
-ril.regrsp("+CIPCLOSE",rsp)
-ril.regrsp("+CIPSHUT",rsp)
-ril.regrsp("+CIICR",rsp)
+local function queryStatus() request("AT+CIPSTATUS") end
 
---gprsÍøÂçÎ´¸½×ÅÊ±£¬¶¨Ê±²éÑ¯¸½×Å×´Ì¬µÄ¼ä¸ô
-local QUERYTIME = 2000
+ril.regRsp('+CGATT', function(a, b, c, intermediate)
+    local attached = (intermediate=="+CGATT: 1")
+    if gprsAttached ~= attached then
+        gprsAttached = attached
+        sys.publish("GPRS_ATTACH",attached)
+    end
+    if attached then
+        request("AT+CIPSTATUS")
+    elseif net.getState() == 'REGISTERED' then
+        sys.timerStart(request, 2000, "AT+CGATT?")
+    end
+end)
+ril.regRsp('+CIPSHUT', function(cmd, success)
+    if success then
+        ready = false
+        sys.publish("IP_SHUT_IND")
+    end
+    if net.getState() ~= 'REGISTERED' then return end
+    request('AT+CGATT?')
+end)
 
---[[
-º¯ÊıÃû£ºcgattrsp
-¹¦ÄÜ  £º²éÑ¯GPRSÊı¾İÍøÂç¸½×Å×´Ì¬µÄÓ¦´ğ´¦Àí
-²ÎÊı  £º
-		cmd£º´ËÓ¦´ğ¶ÔÓ¦µÄATÃüÁî
-		success£ºATÃüÁîÖ´ĞĞ½á¹û£¬true»òÕßfalse
-		response£ºATÃüÁîµÄÓ¦´ğÖĞµÄÖ´ĞĞ½á¹û×Ö·û´®
-		intermediate£ºATÃüÁîµÄÓ¦´ğÖĞµÄÖĞ¼äĞÅÏ¢
-·µ»ØÖµ£ºÎŞ
-]]
-local function cgattrsp(cmd,success,response,intermediate)
-	--ÒÑ¸½×Å
-	if intermediate == "+CGATT: 1" then
-		cgatt = "1"
-		sys.dispatch("NET_GPRS_READY",true)
+ril.regUrc("STATE", function(data)
+    local status = data:sub(8, -1)
+    log.info("link.STATE", "IP STATUS", status)
+    ready = status == "IP PROCESSING" or status == "IP STATUS"
+    if status == 'PDP DEACT' then
+        sys.timerStop(queryStatus)
+        request('AT+CIPSHUT') -- æ‰§è¡ŒCIPSHUTå°†çŠ¶æ€æ¢å¤è‡³IP INITIAL
+        return
+    elseif status == "IP INITIAL" then
+        if net.getState() ~= 'REGISTERED' then return end
+        request(string.format('AT+CSTT="%s","%s","%s"', apnname, username or "", password or ""))
+        request("AT+CIICR")
+    elseif status == "IP START" then
+        request("AT+CIICR")
+    elseif status == "IP CONFIG" then
+        -- nothing to do
+    elseif status == "IP GPRSACT" then        
+        request("AT+CIFSR")
+        request("AT+CIPSTATUS")
+        if dnsIP then request("AT+CDNSCFG="..dnsIP) end
+        request("AT+CDNSCFG?")
+        return
+    elseif status == "IP PROCESSING" or status == "IP STATUS" then
+        sys.timerStop(queryStatus)
+        publish("IP_READY_IND")
+        return
+    end
+    sys.timerStart(queryStatus, 2000)
+end)
 
-		-- Èç¹û´æÔÚÁ´½Ó,ÄÇÃ´ÔÚgprs¸½×ÅÉÏÒÔºó×Ô¶¯¼¤»îIPÍøÂç
-		if base.next(linklist) then
-			if ipstatus == "IP INITIAL" then
-				setupIP()
-			else
-				req("AT+CIPSTATUS")
-			end
-		end
-	--Î´¸½×Å
-	elseif intermediate == "+CGATT: 0" then
-		if cgatt ~= "0" then
-			cgatt = "0"
-			sys.dispatch("NET_GPRS_READY",false)
-		end
-		--ÉèÖÃ¶¨Ê±Æ÷£¬¼ÌĞø²éÑ¯
-		sys.timer_start(querycgatt,QUERYTIME)
-	end
-end
+ril.regUrc("+PDP", function() publish('PDP_DEACT_IND') end)
+-- PDPå»æ¿€æ´»çš„æç¤ºå¯èƒ½å‡ºç°åœ¨URC ä¹Ÿå¯èƒ½åœ¨CIPå‘½ä»¤å‘é€çš„æ—¶å€™æ”¶åˆ°
+sys.subscribe('PDP_DEACT_IND', function()
+    ready = false
+    sys.publish('IP_ERROR_IND')
+    sys.timerStart(queryStatus, 2000) -- 2ç§’åå†æŸ¥è¯¢CIPSTATUS æ ¹æ®IPçŠ¶æ€æ¥åšä¸‹ä¸€æ­¥åŠ¨ä½œ
+end)
 
---[[
-º¯ÊıÃû£ºquerycgatt
-¹¦ÄÜ  £º²éÑ¯GPRSÊı¾İÍøÂç¸½×Å×´Ì¬
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-function querycgatt()
-	--²»ÊÇ·ÉĞĞÄ£Ê½£¬²ÅÈ¥²éÑ¯
-	if not flymode then req("AT+CGATT?",nil,cgattrsp) end
-end
-
--- ÅäÖÃ½Ó¿Ú
-local qsend = 0
-function SetQuickSend(mode)
-	--qsend = mode
-end
-
+-- initial åªèƒ½åˆå§‹åŒ–1æ¬¡ï¼Œè¿™é‡Œæ˜¯åˆå§‹åŒ–å®Œæˆæ ‡å¿—ä½
 local inited = false
---[[
-º¯ÊıÃû£ºinitial
-¹¦ÄÜ  £ºÅäÖÃ±¾Ä£¿é¹¦ÄÜµÄÒ»Ğ©³õÊ¼»¯²ÎÊı
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
+
 local function initial()
-	if not inited then
-		inited = true
-		req("AT+CIICRMODE=2") --ciicrÒì²½
-		req("AT+CIPMUX=1") --¶àÁ´½Ó
-		req("AT+CIPHEAD=1")
-		req("AT+CIPQSEND=" .. qsend)--·¢ËÍÄ£Ê½
-	end
+    if not inited then
+        inited = true
+        request("AT+CIICRMODE=2") --ciicrå¼‚æ­¥
+        request("AT+CIPMUX=1") --å¤šé“¾æ¥
+        request("AT+CIPHEAD=1")
+        request("AT+CIPQSEND="..sendMode) --å‘é€æ¨¡å¼
+    end
 end
 
---[[
-º¯ÊıÃû£ºnetmsg
-¹¦ÄÜ  £ºGSMÍøÂç×¢²á×´Ì¬·¢Éú±ä»¯µÄ´¦Àí
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºtrue
-]]
-local function netmsg(id,data)
-	--GSMÍøÂçÒÑ×¢²á
-	if data == "REGISTERED" then
-		--½øĞĞ³õÊ¼»¯ÅäÖÃ
-		initial() 
-		--¶¨Ê±²éÑ¯GPRSÊı¾İÍøÂç¸½×Å×´Ì¬
-		sys.timer_start(querycgatt,QUERYTIME)
-	end
-
-	return true
+function setSendMode(mode)
+    sendMode = mode or 0
 end
 
---sim¿¨µÄÄ¬ÈÏapn±í
-local apntable =
-{
-	["46000"] = DEFAULT_APN,
-	["46002"] = DEFAULT_APN,
-	["46004"] = DEFAULT_APN,
-	["46007"] = DEFAULT_APN,
-	["46001"] = "UNINET",
-	["46006"] = "UNINET",
-	["46011"] = "",
-}
-
---[[
-º¯ÊıÃû£ºproc
-¹¦ÄÜ  £º±¾Ä£¿é×¢²áµÄÄÚ²¿ÏûÏ¢µÄ´¦Àíº¯Êı
-²ÎÊı  £º
-		id£ºÄÚ²¿ÏûÏ¢id
-		para£ºÄÚ²¿ÏûÏ¢²ÎÊı
-·µ»ØÖµ£ºtrue
-]]
-local function proc(id,para)
-	--IMSI¶ÁÈ¡³É¹¦
-	if id=="IMSI_READY" then
-		--±¾Ä£¿éÄÚ²¿×Ô¶¯»ñÈ¡apnĞÅÏ¢½øĞĞÅäÖÃ
-		if apnflag then
-			if apn then
-				local temp1,temp2,temp3=apn.get_default_apn(tonumber(sim.getmcc(),16),tonumber(sim.getmnc(),16))
-				if temp1 == '' or temp1 == nil then temp1=DEFAULT_APN end
-				setapn(temp1,temp2,temp3)
-			else
-				setapn(apntable[sim.getmcc()..sim.getmnc()] or DEFAULT_APN)
-			end
-		end
-	--·ÉĞĞÄ£Ê½×´Ì¬±ä»¯
-	elseif id=="FLYMODE_IND" then
-		flymode = para
-		if para then
-			sys.timer_stop(req,"AT+CIPSTATUS")
-		else
-			req("AT+CGATT?",nil,cgattrsp)
-		end
-	--Ô¶³ÌÉı¼¶¿ªÊ¼
-	elseif id=="UPDATE_BEGIN_IND" then
-		updating = true
-	--Ô¶³ÌÉı¼¶½áÊø
-	elseif id=="UPDATE_END_IND" then
-		updating = false
-		if shutpending then shut() end
-	--dbg¹¦ÄÜ¿ªÊ¼
-	elseif id=="DBG_BEGIN_IND" then
-		dbging = true
-	--dbg¹¦ÄÜ½áÊø
-	elseif id=="DBG_END_IND" then
-		dbging = false
-		if shutpending then shut() end
-	--NTPÍ¬²½¿ªÊ¼
-	elseif id=="NTP_BEGIN_IND" then
-		ntping = true
-	--NTPÍ¬²½½áÊø
-	elseif id=="NTP_END_IND" then
-		ntping = false
-		if shutpending then shut() end
-	end
-	return true
-end
-
---[[
-º¯ÊıÃû£ºcheckciicr
-¹¦ÄÜ  £ºÉèÖÃ¼¤»îIPÍøÂçÇëÇóºó£¬³¬Ê±Î´³É¹¦µÄ³¬Ê±Ê±¼ä¡£Ö´ĞĞAT+CIICRºó£¬Èç¹ûÉèÖÃÁËcheckciicrtm£¬checkciicrtmºÁÃëºó£¬Ã»ÓĞ¼¤»î³É¹¦£¬ÔòÖØÆôÈí¼ş£¨ÖĞÍ¾Ö´ĞĞAT+CIPSHUTÔò²»ÔÙÖØÆô£©
-²ÎÊı  £º
-		tm£º³¬Ê±Ê±¼ä£¬µ¥Î»ºÁÃë
-·µ»ØÖµ£ºtrue
-]]
-function checkciicr(tm)
-	checkciicrtm = tm
-	ril.regrsp("+CIICR",rsp)
-end
-
---[[
-º¯ÊıÃû£ºsetiperrcb
-¹¦ÄÜ  £ºÉèÖÃ"¼¤»îIPÍøÂçÇëÇóºó£¬³¬Ê±Î´³É¹¦"µÄÓÃ»§»Øµ÷º¯Êı
-²ÎÊı  £º
-		cb£º»Øµ÷º¯Êı
-·µ»ØÖµ£ºÎŞ
-]]
-function setiperrcb(cb)
-	ciicrerrcb = cb
-end
-
---[[
-º¯ÊıÃû£ºsetretrymode
-¹¦ÄÜ  £ºÉèÖÃ"Á¬½Ó¹ı³ÌºÍÊı¾İ·¢ËÍ¹ı³ÌÖĞTCPĞ­ÒéµÄÖØÁ¬²ÎÊı"
-²ÎÊı  £º
-		md£ºnumberÀàĞÍ£¬½öÖ§³Ö0ºÍ1
-			0Îª¾¡¿ÉÄÜ¶àµÄÖØÁ¬£¨¿ÉÄÜ»áºÜ³¤Ê±¼ä²Å»á·µ»ØÁ¬½Ó»òÕß·¢ËÍ½á¹û£©
-			1ÎªÊÊ¶ÈÖØÁ¬£¨Èç¹ûÍøÂç½Ï²î»òÕßÃ»ÓĞÍøÂç£¬¿ÉÒÔ10¼¸Ãë·µ»ØÊ§°Ü½á¹û£©
-·µ»ØÖµ£ºÎŞ
-]]
-function setretrymode(md)
-	ril.request("AT+TCPUSERPARAM=6,"..(md==0 and 4 or 2)..",7200,"..(md==0 and 16 or 8))
-	ril.setDataTimeout(md==0 and 120000 or 60000)
-end
-
---- ÉèÖÃTCP²ã×Ô¶¯ÖØ´«µÄ²ÎÊı
--- @number[opt=4] retryCnt£¬ÖØ´«´ÎÊı£»È¡Öµ·¶Î§0µ½12
--- @number[opt=16] retryMaxTimeout£¬ÏŞÖÆÃ¿´ÎÖØ´«ÔÊĞíµÄ×î´ó³¬Ê±Ê±¼ä(µ¥Î»Ãë)£¬È¡Öµ·¶Î§1µ½16
--- @return nil
--- @usage
--- setTcpResendPara(3,8)
--- setTcpResendPara(4,16)
-function setTcpResendPara(retryCnt, retryMaxTimeout)
-    req("AT+TCPUSERPARAM=6," .. (retryCnt or 4) .. ",7200," .. (retryMaxTimeout or 16))
-    ril.setDataTimeout(((retryCnt or 4)*(retryMaxTimeout or 16) + 60) * 1000)
-end
-
---×¢²á±¾Ä£¿é¹Ø×¢µÄÄÚ²¿ÏûÏ¢µÄ´¦Àíº¯Êı
-sys.regapp(proc,"IMSI_READY","FLYMODE_IND","UPDATE_BEGIN_IND","UPDATE_END_IND","DBG_BEGIN_IND","DBG_END_IND","NTP_BEGIN_IND","NTP_END_IND")
-sys.regapp(netmsg,"NET_STATE_CHANGED")
-checkciicr(120000)
-setTcpResendPara(4,16)
+-- ç½‘ç»œæ³¨å†ŒæˆåŠŸ å‘èµ·GPRSé™„ç€çŠ¶æ€æŸ¥è¯¢
+sys.subscribe("NET_STATE_REGISTERED", function()
+    initial()
+    request('AT+CGATT?')
+end)

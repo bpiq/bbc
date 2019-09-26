@@ -1,328 +1,655 @@
-require"link"
-module(...,package.seeall)
+--- æ¨¡å—åŠŸèƒ½ï¼šæ•°æ®é“¾è·¯æ¿€æ´»ã€SOCKETç®¡ç†(åˆ›å»ºã€è¿æ¥ã€æ•°æ®æ”¶å‘ã€çŠ¶æ€ç»´æŠ¤)
+-- @module socket
+-- @author openLuat
+-- @license MIT
+-- @copyright openLuat
+-- @release 2017.9.25
+require "link"
+require "utils"
+module(..., package.seeall)
 
-local lstate,scks = link.getstate,{}
-SCK_MAX_CNT = 5
-NORMAL,SVR_CHANGE,DISCTHENTRY = 0,1,2
+local req = ril.request
 
-local function print(...)
-	_G.print("socket",...)
+local valid = {"0", "1", "2", "3", "4", "5", "6", "7"}
+local validSsl = {"0", "1", "2", "3", "4", "5", "6", "7"}
+local sockets = {}
+local socketsSsl = {}
+-- å•æ¬¡å‘é€æ•°æ®æœ€å¤§å€¼
+local SENDSIZE = 1460
+-- ç¼“å†²åŒºæœ€å¤§ä¸‹æ ‡
+local INDEX_MAX = 256
+
+--ç”¨æˆ·è‡ªå®šä¹‰çš„DNSè§£æå™¨
+local dnsParser
+local dnsParserToken = 0
+
+--- SOCKET æ˜¯å¦æœ‰å¯ç”¨
+-- @return å¯ç”¨true,ä¸å¯ç”¨false
+socket.isReady = link.isReady
+
+
+local function isSocketActive(ssl)
+    for _, c in pairs(ssl and socketsSsl or sockets) do
+        if c.connected then
+            return true
+        end
+    end
 end
 
-local function checkidx(cause,idx,fnm)
-	if (cause == 0 and idx <= SCK_MAX_CNT) or (cause == 1 and scks[idx]) then
-		return true
-	else
-		print("checkidx "..fnm.." err",idx)
-	end
+local function socketStatusNtfy()
+    sys.publish("SOCKET_ACTIVE", isSocketActive() or isSocketActive(true))
 end
 
-local function checkidx1(idx,fnm)
-	return checkidx(0,idx,fnm) and checkidx(1,idx,fnm)
+local function stopConnectTimer(tSocket, id)
+    if id and tSocket[id] and tSocket[id].co and coroutine.status(tSocket[id].co) == "suspended"
+        and (tSocket[id].wait == "+SSLCONNECT" or tSocket[id].wait == "+CIPSTART") then
+        -- and (tSocket[id].wait == "+SSLCONNECT" or (tSocket[id].protocol == "UDP" and tSocket[id].wait == "+CIPSTART")) then
+        sys.timerStop(coroutine.resume, tSocket[id].co, false, "TIMEOUT")
+    end
 end
 
-local function getidxbyid(id)
-	local i
-	for i=1,SCK_MAX_CNT do
-		if scks[i] and scks[i].id == id then return i end
-	end
+local function errorInd(error)
+    local coSuspended = {}
+    
+    for k, v in pairs({sockets, socketsSsl}) do
+        --if #v ~= 0 then
+        for _, c in pairs(v) do -- IPçŠ¶æ€å‡ºé”™æ—¶ï¼Œé€šçŸ¥æ‰€æœ‰å·²è¿æ¥çš„socket
+            --if c.connected or c.created then
+            if error == 'CLOSED' and not c.ssl then c.connected = false socketStatusNtfy() end
+            c.error = error
+            if c.co and coroutine.status(c.co) == "suspended" then
+                stopConnectTimer(v, c.id)
+                --coroutine.resume(c.co, false)
+                table.insert(coSuspended, c.co)
+            end
+        --end
+        end
+    --end
+    end
+    
+    for k, v in pairs(coSuspended) do
+        if v and coroutine.status(v) == "suspended" then
+            coroutine.resume(v, false)
+        end
+    end
 end
 
-local function conrstpara(idx,suc)
-	if not checkidx(1,idx,"conrstpara") then return end
-	scks[idx].conretry,scks[idx].concause = 0
-	if not suc then	scks[idx].sndpending,scks[idx].sndingitem = {},{} end
-	scks[idx].waitingrspitem = {}
+sys.subscribe("IP_ERROR_IND", function()errorInd('IP_ERROR_IND') end)
+sys.subscribe('IP_SHUT_IND', function()errorInd('CLOSED') end)
+
+--è®¢é˜…rspè¿”å›çš„æ¶ˆæ¯å¤„ç†å‡½æ•°
+local function onSocketURC(data, prefix)
+    local tag, id, result = string.match(data, "([SSL]*)[&]*(%d), *([%u :%d]+)")
+    tSocket = (tag == "SSL" and socketsSsl or sockets)
+    if not id or not tSocket[id] then
+        log.error('socket: urc on nil socket', data, id, tSocket[id], socketsSsl[id])
+        return
+    end
+    if result == "CONNECT OK" or result:match("CONNECT ERROR") or result:match("CONNECT FAIL") then
+        if tSocket[id].wait == "+CIPSTART" or tSocket[id].wait == "+SSLCONNECT" then
+            stopConnectTimer(tSocket, id)
+            coroutine.resume(tSocket[id].co, result == "CONNECT OK")
+        else
+            log.error("socket: error urc", tSocket[id].wait)
+        end
+        return
+    end
+    
+    if tag == "SSL" and string.find(result, "ERROR:") == 1 then return end
+    
+    if string.find(result, "ERROR") or result == "CLOSED" then
+        if result == 'CLOSED' and not tSocket[id].ssl then tSocket[id].connected = false socketStatusNtfy() end
+        tSocket[id].error = result
+        stopConnectTimer(tSocket, id)
+        coroutine.resume(tSocket[id].co, false)
+    end
+end
+-- åˆ›å»ºsocketå‡½æ•°
+local mt = {}
+mt.__index = mt
+local function socket(protocol, cert)
+    local ssl = protocol:match("SSL")
+    local id = table.remove(ssl and validSsl or valid)
+    if not id then
+        log.warn("socket.socket: too many sockets")
+        return nil
+    end
+    
+    local co = coroutine.running()
+    if not co then
+        log.warn("socket.socket: socket must be called in coroutine")
+        return nil
+    end
+    -- å®ä¾‹çš„å±æ€§å‚æ•°è¡¨
+    local o = {
+        id = id,
+        protocol = protocol,
+        ssl = ssl,
+        cert = cert,
+        co = co,
+        input = {},
+        output = {},
+        wait = "",
+        connected = false,
+        iSubscribe = false,
+        subMessage = nil,
+    }
+    
+    tSocket = (ssl and socketsSsl or sockets)
+    tSocket[id] = o
+    
+    return setmetatable(o, mt)
+end
+--- åˆ›å»ºåŸºäºTCPçš„socketå¯¹è±¡
+-- @bool[opt=nil] sslï¼Œæ˜¯å¦ä¸ºsslè¿æ¥ï¼Œtrueè¡¨ç¤ºæ˜¯ï¼Œå…¶ä½™è¡¨ç¤ºå¦
+-- @table[opt=nil] certï¼Œsslè¿æ¥éœ€è¦çš„è¯ä¹¦é…ç½®ï¼Œåªæœ‰sslå‚æ•°ä¸ºtrueæ—¶ï¼Œæ‰å‚æ•°æ‰æœ‰æ„ä¹‰ï¼Œcertæ ¼å¼å¦‚ä¸‹ï¼š
+-- {
+--     caCert = "ca.crt", --CAè¯ä¹¦æ–‡ä»¶(Base64ç¼–ç  X.509æ ¼å¼)ï¼Œå¦‚æœå­˜åœ¨æ­¤å‚æ•°ï¼Œåˆ™è¡¨ç¤ºå®¢æˆ·ç«¯ä¼šå¯¹æœåŠ¡å™¨çš„è¯ä¹¦è¿›è¡Œæ ¡éªŒï¼›ä¸å­˜åœ¨åˆ™ä¸æ ¡éªŒ
+--     clientCert = "client.crt", --å®¢æˆ·ç«¯è¯ä¹¦æ–‡ä»¶(Base64ç¼–ç  X.509æ ¼å¼)ï¼ŒæœåŠ¡å™¨å¯¹å®¢æˆ·ç«¯çš„è¯ä¹¦è¿›è¡Œæ ¡éªŒæ—¶ä¼šç”¨åˆ°æ­¤å‚æ•°
+--     clientKey = "client.key", --å®¢æˆ·ç«¯ç§é’¥æ–‡ä»¶(Base64ç¼–ç  X.509æ ¼å¼)
+--     clientPassword = "123456", --å®¢æˆ·ç«¯è¯ä¹¦æ–‡ä»¶å¯†ç [å¯é€‰]
+-- }
+-- @return clientï¼Œåˆ›å»ºæˆåŠŸè¿”å›socketå®¢æˆ·ç«¯å¯¹è±¡ï¼›åˆ›å»ºå¤±è´¥è¿”å›nil
+-- @usage
+-- c = socket.tcp()
+-- c = socket.tcp(true)
+-- c = socket.tcp(true, {caCert="ca.crt"})
+-- c = socket.tcp(true, {caCert="ca.crt", clientCert="client.crt", clientKey="client.key"})
+-- c = socket.tcp(true, {caCert="ca.crt", clientCert="client.crt", clientKey="client.key", clientPassword="123456"})
+function tcp(ssl, cert)
+    return socket("TCP" .. (ssl == true and "SSL" or ""), (ssl == true) and cert or nil)
+end
+--- åˆ›å»ºåŸºäºUDPçš„socketå¯¹è±¡
+-- @return clientï¼Œåˆ›å»ºæˆåŠŸè¿”å›socketå®¢æˆ·ç«¯å¯¹è±¡ï¼›åˆ›å»ºå¤±è´¥è¿”å›nil
+-- @usage c = socket.udp()
+function udp()
+    return socket("UDP")
 end
 
-local function sndrstpara(idx)
-	if not checkidx(1,idx,"sndrstpara") then return end
-	scks[idx].sndretry,scks[idx].sndingitem = 0,{}
+local sslInited
+local tSslInputCert, sSslInputCert = {}, ""
+
+local function sslInit()
+    if not sslInited then
+        sslInited = true
+        req("AT+SSLINIT")
+    end
+    
+    local i, item
+    for i = 1, #tSslInputCert do
+        item = table.remove(tSslInputCert, 1)
+        req(item.cmd, item.arg)
+    end
+    tSslInputCert = {}
 end
 
-local function discrstpara(idx)
-	if not checkidx(1,idx,"discrstpara") then return end
-	scks[idx].discause = nil
+local function sslTerm()
+    if sslInited then
+        if not isSocketActive(true) then
+            sSslInputCert, sslInited = ""
+            req("AT+SSLTERM")
+        end
+    end
 end
 
-local function rsumscksnd(idx)
-	if not checkidx(1,idx,"rsumscksnd") then return end
-	if lstate(scks[idx].id) ~= "CONNECTED" then
-		return link.connect(scks[idx].id,scks[idx].prot,scks[idx].addr,scks[idx].port)
-	else
-		if #scks[idx].sndpending ~= 0 and not scks[idx].sndingitem.data and not scks[idx].waitingrspitem.data then
-			local item = table.remove(scks[idx].sndpending,1)
-			if link.send(scks[idx].id,item.data) then
-				scks[idx].sndingitem = item
-			else
-				table.insert(scks[idx].sndpending,1,item)
-			end
-		end
-	end
-	return true
+local function sslInputCert(t, f)
+    if sSslInputCert:match(t .. f .. "&") then return end
+    if not tSslInputCert then tSslInputCert = {} end
+    local s = io.readFile((f:sub(1, 1) == "/") and f or ("/ldata/" .. f))
+    if not s then log.error("inputcrt err open", path) return end
+    table.insert(tSslInputCert, {cmd = "AT+SSLCERT=0,\"" .. t .. "\",\"" .. f .. "\",1," .. s:len(), arg = s or ""})
+    sSslInputCert = sSslInputCert .. t .. f .. "&"
 end
 
-function setwaitingrspitem(idx,item)
-	if not checkidx(1,idx,"setwaitingrspitem") then return end
-	scks[idx].waitingrspitem = item
-	if not item.data then
-		rsumscksnd(idx)
-	end
+--- è¿æ¥æœåŠ¡å™¨
+-- @string address æœåŠ¡å™¨åœ°å€ï¼Œæ”¯æŒipå’ŒåŸŸå
+-- @param port stringæˆ–è€…numberç±»å‹ï¼ŒæœåŠ¡å™¨ç«¯å£
+-- @return bool result true - æˆåŠŸï¼Œfalse - å¤±è´¥
+-- @number timeout, é“¾æ¥æœåŠ¡å™¨æœ€é•¿è¶…æ—¶æ—¶é—´
+-- @usage  c = socket.tcp(); c:connect("www.baidu.com",80,5);
+function mt:connect(address, port, timeout)
+    assert(self.co == coroutine.running(), "socket:connect: coroutine mismatch")
+    
+    if not link.isReady() then
+        log.info("socket.connect: ip not ready")
+        return false
+    end
+    
+    if cc and cc.anyCallExist() then
+        log.info("socket:connect: call exist, cannot connect")
+        return false
+    end
+    self.address = address
+    self.port = port
+    if self.ssl then
+        local tConfigCert, i = {}
+        if self.cert then
+            if self.cert.caCert then
+                sslInputCert("cacrt", self.cert.caCert)
+                table.insert(tConfigCert, "AT+SSLCERT=1," .. self.id .. ",\"cacrt\",\"" .. self.cert.caCert .. "\"")
+            end
+            if self.cert.clientCert then
+                sslInputCert("localcrt", self.cert.clientCert)
+                table.insert(tConfigCert, "AT+SSLCERT=1," .. self.id .. ",\"localcrt\",\"" .. self.cert.clientCert .. "\",\"" .. (self.cert.clientPassword or "") .. "\"")
+            end
+            if self.cert.clientKey then
+                sslInputCert("localprivatekey", self.cert.clientKey)
+                table.insert(tConfigCert, "AT+SSLCERT=1," .. self.id .. ",\"localprivatekey\",\"" .. self.cert.clientKey .. "\"")
+            end
+        end
+        
+        sslInit()
+        req(string.format("AT+SSLCREATE=%d,\"%s\",%d", self.id, address .. ":" .. port, (self.cert and self.cert.caCert) and 0 or 1))
+        self.created = true
+        for i = 1, #tConfigCert do
+            req(tConfigCert[i])
+        end
+        req("AT+SSLCONNECT=" .. self.id)
+    else
+        req(string.format("AT+CIPSTART=%d,\"%s\",\"%s\",%s", self.id, self.protocol, address, port))
+    end
+    -- if self.ssl or self.protocol == "UDP" then sys.timerStart(coroutine.resume, 120000, self.co, false, "TIMEOUT") end
+    sys.timerStart(coroutine.resume, (timeout or 120) * 1000, self.co, false, "TIMEOUT")
+    
+    ril.regUrc((self.ssl and "SSL&" or "") .. self.id, onSocketURC)
+    self.wait = self.ssl and "+SSLCONNECT" or "+CIPSTART"
+    
+    local r, s = coroutine.yield()
+    
+    if r == false and s == "DNS" then
+        if self.ssl then self:sslDestroy()self.error = nil end
+        
+        require "http"
+        --è¯·æ±‚è…¾è®¯äº‘å…è´¹HttpDnsè§£æ
+        http.request("GET", "119.29.29.29/d?dn=" .. address, nil, nil, nil, 40000,
+            function(result, statusCode, head, body)
+                log.info("socket.httpDnsCb", result, statusCode, head, body)
+                sys.publish("SOCKET_HTTPDNS_RESULT", result, statusCode, head, body)
+            end)
+        local _, result, statusCode, head, body = sys.waitUntil("SOCKET_HTTPDNS_RESULT")
+        
+        --DNSè§£ææˆåŠŸ
+        if result and statusCode == "200" and body and body:match("^[%d%.]+") then
+            return self:connect(body:match("^([%d%.]+)"), port)
+        --DNSè§£æå¤±è´¥
+        else
+            if dnsParser then
+                dnsParserToken = dnsParserToken + 1
+                dnsParser(address, dnsParserToken)
+                local result, ip = sys.waitUntil("USER_DNS_PARSE_RESULT_" .. dnsParserToken, 40000)
+                if result and ip and ip:match("^[%d%.]+") then
+                    return self:connect(ip:match("^[%d%.]+"), port)
+                end
+            end
+        end
+    end
+    
+    if r == false then
+        if self.ssl then self:sslDestroy() end
+        sys.publish("LIB_SOCKET_CONNECT_FAIL_IND", self.ssl, self.protocol, address, port)
+        return false
+    end
+    self.connected = true
+    socketStatusNtfy()
+    return true
 end
 
-local function conack(idx,cause,suc)	
-	if #scks[idx].sndpending ~= 0 and not suc then
-		while #scks[idx].sndpending ~= 0 do
-			scks[idx].rsp(idx,"SEND",suc,table.remove(scks[idx].sndpending,1))
-		end
-	end
-	scks[idx].rsp(idx,"CONNECT",suc,cause)
-	conrstpara(idx,suc)
+--- å¼‚æ­¥æ”¶å‘é€‰æ‹©å™¨
+-- @number keepAlive,æœåŠ¡å™¨å’Œå®¢æˆ·ç«¯æœ€å¤§é€šä¿¡é—´éš”æ—¶é—´,ä¹Ÿå«å¿ƒè·³åŒ…æœ€å¤§æ—¶é—´,å•ä½ç§’
+-- @string pingreq,å¿ƒè·³åŒ…çš„å­—ç¬¦ä¸²
+-- @return boole,false å¤±è´¥ï¼Œtrue è¡¨ç¤ºæˆåŠŸ
+function mt:asyncSelect(keepAlive, pingreq)
+    assert(self.co == coroutine.running(), "socket:asyncSelect: coroutine mismatch")
+    if self.error then
+        log.warn('socket.client:asyncSelect', 'error', self.error)
+        return false
+    end
+    
+    self.wait = "SOCKET_SEND"
+    while #self.output ~= 0 do
+        local data = table.concat(self.output)
+        self.output = {}
+        for i = 1, string.len(data), SENDSIZE do
+            -- æŒ‰æœ€å¤§MTUå•å…ƒå¯¹dataåˆ†åŒ…
+            local stepData = string.sub(data, i, i + SENDSIZE - 1)
+            --å‘é€ATå‘½ä»¤æ‰§è¡Œæ•°æ®å‘é€
+            req(string.format("AT+" .. (self.ssl and "SSL" or "CIP") .. "SEND=%d,%d", self.id, string.len(stepData)), stepData)
+            self.wait = self.ssl and "+SSLSEND" or "+CIPSEND"
+            if not coroutine.yield() then
+                if self.ssl then self:sslDestroy() end
+                sys.publish("LIB_SOCKET_SEND_FAIL_IND", self.ssl, self.protocol, self.address, self.port)
+                return false
+            end
+        end
+    end
+    self.wait = "SOCKET_WAIT"
+    sys.publish("SOCKET_SEND", self.id)
+    if keepAlive and keepAlive ~= 0 then
+        if type(pingreq) == "function" then
+            sys.timerStart(pingreq, keepAlive * 1000)
+        else
+            sys.timerStart(self.asyncSend, keepAlive * 1000, self, pingreq or "\0")
+        end
+    end
+    return coroutine.yield()
+end
+--- å¼‚æ­¥å‘é€æ•°æ®
+-- @string data æ•°æ®
+-- @return result true - æˆåŠŸï¼Œfalse - å¤±è´¥
+-- @usage  c = socket.tcp(); c:connect(); c:asyncSend("12345678");
+function mt:asyncSend(data)
+    if self.error then
+        log.warn('socket.client:asyncSend', 'error', self.error)
+        return false
+    end
+    table.insert(self.output, data or "")
+    if self.wait == "SOCKET_WAIT" then coroutine.resume(self.co, true) end
+    return true
+end
+--- å¼‚æ­¥æ¥æ”¶æ•°æ®
+-- @return nil, è¡¨ç¤ºæ²¡æœ‰æ”¶åˆ°æ•°æ®
+-- @return data å¦‚æœæ˜¯UDPåè®®ï¼Œè¿”å›æ–°çš„æ•°æ®åŒ…,å¦‚æœæ˜¯TCP,è¿”å›æ‰€æœ‰æ”¶åˆ°çš„æ•°æ®,æ²¡æœ‰æ•°æ®è¿”å›é•¿åº¦ä¸º0çš„ç©ºä¸²
+-- @usage c = socket.tcp(); c:connect()
+-- @usage data = c:asyncRecv()
+function mt:asyncRecv()
+    if #self.input == 0 then return "" end
+    if self.protocol == "UDP" then
+        return table.remove(self.input)
+    else
+        local s = table.concat(self.input)
+        self.input = {}
+        return s
+    end
 end
 
-local function sndnxt(id,idx)
-	local item = table.remove(scks[idx].sndpending,1)
-	if link.send(id,item.data) then
-		scks[idx].sndingitem = item
-	else
-		table.insert(scks[idx].sndpending,1,item)
-	end
+--- å‘é€æ•°æ®
+-- @string data æ•°æ®
+-- @return result true - æˆåŠŸï¼Œfalse - å¤±è´¥
+-- @usage  c = socket.tcp(); c:connect(); c:send("12345678");
+function mt:send(data)
+    assert(self.co == coroutine.running(), "socket:send: coroutine mismatch")
+    if self.error then
+        log.warn('socket.client:send', 'error', self.error)
+        return false
+    end
+    if self.id == nil then
+        log.warn('socket.client:send', 'closed')
+        return false
+    end
+    
+    for i = 1, string.len(data or ""), SENDSIZE do
+        -- æŒ‰æœ€å¤§MTUå•å…ƒå¯¹dataåˆ†åŒ…
+        local stepData = string.sub(data, i, i + SENDSIZE - 1)
+        --å‘é€ATå‘½ä»¤æ‰§è¡Œæ•°æ®å‘é€
+        req(string.format("AT+" .. (self.ssl and "SSL" or "CIP") .. "SEND=%d,%d", self.id, string.len(stepData)), stepData)
+        self.wait = self.ssl and "+SSLSEND" or "+CIPSEND"
+        if not coroutine.yield() then
+            if self.ssl then self:sslDestroy() end
+            sys.publish("LIB_SOCKET_SEND_FAIL_IND", self.ssl, self.protocol, self.address, self.port)
+            return false
+        end
+    end
+    return true
+end
+--- æ¥æ”¶æ•°æ®
+-- @number[opt=0] timeout å¯é€‰å‚æ•°ï¼Œæ¥æ”¶è¶…æ—¶æ—¶é—´ï¼Œå•ä½æ¯«ç§’
+-- @string[opt=nil] msg å¯é€‰å‚æ•°ï¼Œæ§åˆ¶socketæ‰€åœ¨çš„çº¿ç¨‹é€€å‡ºrecvé˜»å¡çŠ¶æ€
+-- @return result æ•°æ®æ¥æ”¶ç»“æœï¼Œtrueè¡¨ç¤ºæˆåŠŸï¼Œfalseè¡¨ç¤ºå¤±è´¥
+-- @return data å¦‚æœæˆåŠŸçš„è¯ï¼Œè¿”å›æ¥æ”¶åˆ°çš„æ•°æ®ï¼›è¶…æ—¶æ—¶è¿”å›é”™è¯¯ä¸º"timeout"ï¼›msgæ§åˆ¶é€€å‡ºæ—¶è¿”å›msgçš„å­—ç¬¦ä¸²
+-- @return param å¦‚æœæ˜¯msgè¿”å›çš„falseï¼Œåˆ™dataçš„å€¼æ˜¯msgï¼Œparamçš„å€¼æ˜¯msgçš„å‚æ•°
+-- @usage c = socket.tcp(); c:connect()
+-- @usage result, data = c:recv()
+-- @usage false,msg,param = c:recv(60000,"publish_msg")
+function mt:recv(timeout, msg)
+    assert(self.co == coroutine.running(), "socket:recv: coroutine mismatch")
+    if self.error then
+        log.warn('socket.client:recv', 'error', self.error)
+        return false
+    end
+    if msg and not self.iSubscribe then
+        self.iSubscribe = msg
+        self.subMessage = function(data)
+            if data then table.insert(self.output, data) end
+            if self.wait == "+RECEIVE" or self.wait == "+SSL RECEIVE" then coroutine.resume(self.co, 0xAA) end
+        end
+        sys.subscribe(msg, self.subMessage)
+    end
+    if msg and #self.output ~= 0 then sys.publish(msg, false) end
+    if #self.input == 0 then
+        self.wait = self.ssl and "+SSL RECEIVE" or "+RECEIVE"
+        if timeout and timeout > 0 then
+            local r, s = sys.wait(timeout)
+            -- if not r then
+            --     return false, "timeout"
+            -- elseif r and r == msg then
+            --     return false, r, s
+            -- else
+            --     if self.ssl and not r then self:sslDestroy() end
+            --     return r, s
+            -- end
+            if r == nil then
+                return false, "timeout"
+            elseif r == 0xAA then
+                local dat = table.concat(self.output)
+                self.output = {}
+                return false, msg, dat
+            else
+                if self.ssl and not r then self:sslDestroy() end
+                return r, s
+            end
+        else
+            local r, s = coroutine.yield()
+            if r == 0xAA then
+                local dat = table.concat(self.output)
+                self.output = {}
+                return false, msg, dat
+            else
+                return r, s
+            end
+        end
+    end
+    
+    if self.protocol == "UDP" then
+        return true, table.remove(self.input)
+    else
+        local s = table.concat(self.input)
+        self.input = {}
+        return true, s
+    end
 end
 
-local function sndack(idx,suc,item)
-	sndrstpara(idx)
-	scks[idx].rsp(idx,"SEND",suc,item)	
-	if #scks[idx].sndpending ~= 0 and not suc then
-		while #scks[idx].sndpending ~= 0 do
-			scks[idx].rsp(idx,"SEND",suc,table.remove(scks[idx].sndpending,1))
-		end
-	end
+function mt:sslDestroy()
+    assert(self.co == coroutine.running(), "socket:sslDestroy: coroutine mismatch")
+    if self.ssl and (self.connected or self.created) then
+        self.connected = false
+        self.created = false
+        req("AT+SSLDESTROY=" .. self.id)
+        self.wait = "+SSLDESTROY"
+        coroutine.yield()
+        socketStatusNtfy()
+    end
+end
+--- é”€æ¯ä¸€ä¸ªsocket
+-- @return nil
+-- @usage  c = socket.tcp(); c:connect(); c:send("123"); c:close()
+function mt:close(slow)
+    assert(self.co == coroutine.running(), "socket:close: coroutine mismatch")
+    if self.iSubscribe then
+        sys.unsubscribe(self.iSubscribe, self.subMessage)
+        self.iSubscribe = false
+    end
+    if self.connected or self.created then
+        self.connected = false
+        self.created = false
+        req(self.ssl and ("AT+SSLDESTROY=" .. self.id) or ("AT+CIPCLOSE=" .. self.id .. (slow and ",0" or "")))
+        self.wait = self.ssl and "+SSLDESTROY" or "+CIPCLOSE"
+        coroutine.yield()
+        socketStatusNtfy()
+    end
+    if self.id ~= nil then
+        ril.deRegUrc((self.ssl and "SSL&" or "") .. self.id, onSocketURC)
+        table.insert((self.ssl and validSsl or valid), 1, self.id)
+        if self.ssl then
+            socketsSsl[self.id] = nil
+        else
+            sockets[self.id] = nil
+        end
+        self.id = nil
+    end
+end
+local function onResponse(cmd, success, response, intermediate)
+    local prefix = string.match(cmd, "AT(%+%u+)")
+    local id = string.match(cmd, "AT%+%u+=(%d)")
+    if response == '+PDP: DEACT' then sys.publish('PDP_DEACT_IND') end -- cipsend å¦‚æœæ­£å¥½pdp deactä¼šè¿”å›+PDP: DEACTä½œä¸ºå›åº”
+    local tSocket = prefix:match("SSL") and socketsSsl or sockets
+    if not tSocket[id] then
+        log.warn('socket: response on nil socket', cmd, response)
+        return
+    end
+    
+    if cmd:match("^AT%+SSLCREATE") then
+        tSocket[id].createResp = response
+    end
+    if tSocket[id].wait == prefix then
+        if (prefix == "+CIPSTART" or prefix == "+SSLCONNECT") and success then
+            -- CIPSTART,SSLCONNECT è¿”å›OKåªæ˜¯è¡¨ç¤ºè¢«æ¥å—
+            return
+        end
+        
+        if prefix == '+CIPSEND' then
+            if response:match("%d, *([%u%d :]+)") ~= 'SEND OK' then
+                local acceptLen = response:match("DATA ACCEPT:%d,(%d+)")
+                if acceptLen then
+                    if acceptLen ~= cmd:match("AT%+%u+=%d,(%d+)") then
+                        success = false
+                    end
+                else
+                    success = false
+                end
+            end
+        elseif prefix == "+SSLSEND" then
+            if response:match("%d, *([%u%d :]+)") ~= 'SEND OK' then
+                success = false
+            end
+        end
+        
+        local reason, address
+        if not success then
+            if prefix == "+CIPSTART" then
+                address = cmd:match("AT%+CIPSTART=%d,\"%a+\",\"(.+)\",%d+")
+            elseif prefix == "+SSLCONNECT" and (tSocket[id].createResp or ""):match("SSL&%d+,CREATE ERROR: 4") then
+                address = tSocket[id].address or ""
+            end
+            if address and not address:match("^[%d%.]+$") then
+                reason = "DNS"
+            end
+        end
+        
+        if not reason and not success then tSocket[id].error = response end
+        stopConnectTimer(tSocket, id)
+        coroutine.resume(tSocket[id].co, success, reason)
+    end
 end
 
-local function sckrsp(id,evt,val)--¶Ô´ËÁ¬½ÓµÄ×´Ì¬Í¨ÖªºÍ´¦ÀíµÄ³ÌĞò
-	local idx = getidxbyid(id)
-	if not idx then print("sckrsp err idx",id,evt,val) return end
-	print("sckrsp",id,evt,val)
-
-	if evt == "CONNECT" then
-		local cause = scks[idx].concause
-		if val ~= "CONNECT OK" then
-			scks[idx].conretry = scks[idx].conretry + 1
-			if scks[idx].conretry >= 1 then
-				conack(idx,cause,false)
-			else
-				if not link.connect(id,scks[idx].prot,scks[idx].addr,scks[idx].port) then
-					conack(idx,cause,false)
-				end
-			end
-		else
-			conack(idx,cause,true)
-			if #scks[idx].sndpending ~= 0 and not scks[idx].sndingitem.data then
-				sndnxt(id,idx)
-			end
-		end
-	elseif evt == "SEND" then
-		local item = scks[idx].sndingitem
-		if val ~= "SEND OK" then
-			scks[idx].sndretry = scks[idx].sndretry + 1
-			if scks[idx].sndretry >= 1 then
-				sndack(idx,false,item)
-			else
-				if not link.send(id,item.data) then---Ïò·şÎñÆ÷·¢ËÍÊı¾İ
-					sndack(idx,false,item)
-				end
-			end
-		else
-			sndack(idx,true,item)
-			if #scks[idx].sndpending ~= 0 and not scks[idx].sndingitem.data and not scks[idx].waitingrspitem.data then
-				sndnxt(id,idx)
-			end
-		end
-	elseif evt == "DISCONNECT" then
-		local cause = scks[idx].discause
-		discrstpara(idx)
-		if cause == SVR_CHANGE or #scks[idx].sndpending ~= 0 then
-			--link.connect(id,scks[idx].prot,scks[idx].addr,scks[idx].port)
-			scks[idx].concause = cause
-		end
-		scks[idx].rsp(idx,"DISCONNECT",true,cause)
-	elseif evt == "CLOSE" then
-		local rspCb = scks[idx].rsp
-		scks[idx] = nil
-		rspCb(idx,"CLOSE",true)	
-	elseif evt == "STATE" and val == "CLOSED" then
-		if #scks[idx].sndpending ~= 0 then
-			--link.connect(id,scks[idx].prot,scks[idx].addr,scks[idx].port)
-			while #scks[idx].sndpending ~= 0 do
-				scks[idx].rsp(idx,"SEND",false,table.remove(scks[idx].sndpending,1))
-			end
-		end
-		scks[idx].rsp(idx,evt,val,nil)
-	else
-		scks[idx].rsp(idx,evt,val,nil)
-	end
+local function onSocketReceiveUrc(urc)
+    local tag, id, len = string.match(urc, "([SSL]*) *RECEIVE,(%d), *(%d+)")
+    tSocket = (tag == "SSL" and socketsSsl or sockets)
+    len = tonumber(len)
+    if len == 0 then return urc end
+    local cache = {}
+    local function filter(data)
+        --å‰©ä½™æœªæ”¶åˆ°çš„æ•°æ®é•¿åº¦
+        if string.len(data) >= len then -- até€šé“çš„å†…å®¹æ¯”å‰©ä½™æœªæ”¶åˆ°çš„æ•°æ®å¤š
+            -- æˆªå–ç½‘ç»œå‘æ¥çš„æ•°æ®
+            table.insert(cache, string.sub(data, 1, len))
+            -- å‰©ä¸‹çš„æ•°æ®æ‰”ç»™atè¿›è¡Œåç»­å¤„ç†
+            data = string.sub(data, len + 1, -1)
+            if not tSocket[id] then
+                log.warn('socket: receive on nil socket', id)
+            else
+                sys.publish("SOCKET_RECV", id)
+                local s = table.concat(cache)
+                if tSocket[id].wait == "+RECEIVE" or tSocket[id].wait == "+SSL RECEIVE" then
+                    coroutine.resume(tSocket[id].co, true, s)
+                else -- æ•°æ®è¿›ç¼“å†²åŒºï¼Œç¼“å†²åŒºæº¢å‡ºé‡‡ç”¨è¦†ç›–æ¨¡å¼
+                    if #tSocket[id].input > INDEX_MAX then tSocket[id].input = {} end
+                    table.insert(tSocket[id].input, s)
+                end
+            end
+            return data
+        else
+            table.insert(cache, data)
+            len = len - string.len(data)
+            return "", filter
+        end
+    end
+    return filter
 end
 
-local function sckrcv(id,data)--¶Ô´ËÁ¬½ÓÊÕµ½Êı¾İ½øĞĞ´¦ÀíµÄ³ÌĞò
-	scks[getidxbyid(id)].rcv(getidxbyid(id),data)
+ril.regRsp("+CIPCLOSE", onResponse)
+ril.regRsp("+CIPSEND", onResponse)
+ril.regRsp("+CIPSTART", onResponse)
+ril.regRsp("+SSLDESTROY", onResponse)
+ril.regRsp("+SSLCREATE", onResponse)
+ril.regRsp("+SSLSEND", onResponse)
+ril.regRsp("+SSLCONNECT", onResponse)
+ril.regUrc("+RECEIVE", onSocketReceiveUrc)
+ril.regUrc("+SSL RECEIVE", onSocketReceiveUrc)
+
+function printStatus()
+    log.info('socket.printStatus', 'valid id', table.concat(valid), table.concat(validSsl))
+    
+    for m, n in pairs({sockets, socketsSsl}) do
+        for _, client in pairs(n) do
+            for k, v in pairs(client) do
+                log.info('socket.printStatus', 'client', client.id, k, v)
+            end
+        end
+    end
 end
 
-function clrsnding(idx)
-	if not checkidx1(idx,"clrsnding") then return end
-	iscks[idx].sndpending = {}
+--- è®¾ç½®TCPå±‚è‡ªåŠ¨é‡ä¼ çš„å‚æ•°
+-- @number[opt=4] retryCntï¼Œé‡ä¼ æ¬¡æ•°ï¼›å–å€¼èŒƒå›´0åˆ°12
+-- @number[opt=16] retryMaxTimeoutï¼Œé™åˆ¶æ¯æ¬¡é‡ä¼ å…è®¸çš„æœ€å¤§è¶…æ—¶æ—¶é—´(å•ä½ç§’)ï¼Œå–å€¼èŒƒå›´1åˆ°16
+-- @return nil
+-- @usage
+-- setTcpResendPara(3,8)
+-- setTcpResendPara(4,16)
+function setTcpResendPara(retryCnt, retryMaxTimeout)
+    req("AT+TCPUSERPARAM=6," .. (retryCnt or 4) .. ",7200," .. (retryMaxTimeout or 16))
+    ril.setDataTimeout(((retryCnt or 4) * (retryMaxTimeout or 16) + 60) * 1000)
 end
 
-local function init(idx,id,cause,prot,addr,port,rsp,rcv,discause)
-	scks[idx] =
-	{
-		id = id,
-		addr = addr,
-		port = port,
-		prot = prot,
-		conretry = 0,
-		sndretry = 0,
-		sndpending = {},
-		sndingitem = {},
-		waitingrspitem = {},
-		rsp = rsp,
-		rcv = rcv,
-		concause = cause,
-		discause = discause,
-	}
+--- è®¾ç½®ç”¨æˆ·è‡ªå®šä¹‰çš„DNSè§£æå™¨.
+-- é€šè¿‡åŸŸåè¿æ¥æœåŠ¡å™¨æ—¶ï¼ŒDNSè§£æçš„è¿‡ç¨‹å¦‚ä¸‹ï¼š
+-- 1ã€ä½¿ç”¨coreä¸­æä¾›çš„æ–¹å¼ï¼Œè¿æ¥è¿è¥å•†DNSæœåŠ¡å™¨è§£æï¼Œå¦‚æœè§£ææˆåŠŸï¼Œåˆ™ç»“æŸï¼›å¦‚æœè§£æå¤±è´¥ï¼Œèµ°ç¬¬2æ­¥
+-- 2ã€ä½¿ç”¨è„šæœ¬libä¸­æä¾›çš„å…è´¹è…¾è®¯äº‘HttpDnsè§£æï¼Œå¦‚æœè§£ææˆåŠŸï¼Œåˆ™ç»“æŸï¼›å¦‚æœè§£æå¤±è´¥ï¼Œèµ°ç¬¬3æ­¥
+-- 3ã€å¦‚æœå­˜åœ¨ç”¨æˆ·è‡ªå®šä¹‰çš„DNSè§£æå™¨ï¼Œåˆ™ä½¿ç”¨æ­¤å¤„ç”¨æˆ·è‡ªå®šä¹‰çš„DNSè§£æå™¨å»è§£æ
+-- @function[opt=nil] parserFncï¼Œç”¨æˆ·è‡ªå®šä¹‰çš„DNSè§£æå™¨å‡½æ•°ï¼Œå‡½æ•°çš„è°ƒç”¨å½¢å¼ä¸ºï¼š
+--      parserFnc(domainName,token)ï¼Œè°ƒç”¨æ¥å£åä¼šç­‰å¾…è§£æç»“æœçš„æ¶ˆæ¯é€šçŸ¥æˆ–è€…40ç§’è¶…æ—¶å¤±è´¥
+--          domainNameï¼šstringç±»å‹ï¼Œè¡¨ç¤ºåŸŸåï¼Œä¾‹å¦‚"www.baidu.com"
+--          tokenï¼šstringç±»å‹ï¼Œæ­¤æ¬¡DNSè§£æè¯·æ±‚çš„tokenï¼Œä¾‹å¦‚"1"
+--      è§£æç»“æŸåï¼Œè¦publishä¸€ä¸ªæ¶ˆæ¯æ¥é€šçŸ¥è§£æç»“æœï¼Œæ¶ˆæ¯å‚æ•°ä¸­çš„ipåœ°å€æœ€å¤šè¿”å›ä¸€ä¸ªï¼Œsys.publish("USER_DNS_PARSE_RESULT_"..token,ip)ï¼Œä¾‹å¦‚ï¼š
+--          sys.publish("USER_DNS_PARSE_RESULT_1","115.239.211.112")
+--              è¡¨ç¤ºè§£ææˆåŠŸï¼Œè§£æåˆ°1ä¸ªIPåœ°å€115.239.211.112
+--          sys.publish("USER_DNS_PARSE_RESULT_1")
+--              è¡¨ç¤ºè§£æå¤±è´¥
+-- @return nil
+-- @usage socket.setDnsParser(parserFnc)
+function setDnsParser(parserFnc)
+    dnsParser = parserFnc
 end
 
---[[
-º¯ÊıÃû£ºcreate
-¹¦ÄÜ  £º´´½¨socket£¨Èç¹ûsocket²»´æÔÚ£©
-²ÎÊı  £º
-		idx£ºnumberÀàĞÍ£¬socket id£¬Èç¹ûÊ¹ÓÃÁËmqttÄ£¿é£¬È¡Öµ·¶Î§ÊÇ1¡¢2¡¢3£»Èç¹ûÃ»Ê¹ÓÃmqttÄ£¿é£¬È¡Öµ·¶Î§ÊÇ1¡¢2¡¢3¡¢4¡¢5¡£[±ØÑ¡]
-		prot£ºstringÀàĞÍ£¬´«Êä²ãĞ­Òé£¬Ä¿Ç°½öÖ§³Ö"TCP"ºÍ"UDP"
-		addr£ºstringÀàĞÍ£¬·şÎñÆ÷µØÖ·£¬Ö§³ÖIPµØÖ·ºÍÓòÃû
-		port£ºnumberÀàĞÍ£¬·şÎñÆ÷¶Ë¿Ú
-		rsp£ºfunctionÀàĞÍ£¬socketµÄ×´Ì¬´¦Àíº¯Êı
-		rcv£ºfunctionÀàĞÍ£¬socketµÄÊı¾İ½ÓÊÕ´¦Àíº¯Êı
-		cause£ºÔİÊ±ÎŞÓÃ£¬ºóĞøÀ©Õ¹Ê¹ÓÃ
-·µ»ØÖµ£ºtrue±íÊ¾³É¹¦´´½¨ÁËsocket£¬false±íÊ¾Ã»ÓĞ³É¹¦´´½¨
-]]
-function create(idx,prot,addr,port,rsp,rcv,cause)
-	if not checkidx(0,idx,"create") or checkidx(1,idx,"create") then return end
-	init(idx,link.open(sckrsp,sckrcv),cause,prot,addr,port,rsp,rcv)
-	return true
+--- è®¾ç½®æ•°æ®å‘é€æ¨¡å¼ï¼ˆåœ¨ç½‘ç»œå‡†å¤‡å°±ç»ªä¹‹å‰è°ƒç”¨æ­¤æ¥å£è®¾ç½®ï¼‰.
+-- å¦‚æœè®¾ç½®ä¸ºå¿«å‘æ¨¡å¼ï¼Œæ³¨æ„å¦‚ä¸‹ä¸¤ç‚¹ï¼š
+-- 1ã€é€šè¿‡sendæ¥å£å‘é€çš„æ•°æ®ï¼Œå¦‚æœæˆåŠŸå‘é€åˆ°æœåŠ¡å™¨ï¼Œè®¾å¤‡ç«¯æ— æ³•è·å–åˆ°è¿™ä¸ªæˆåŠŸçŠ¶æ€
+-- 2ã€é€šè¿‡sendæ¥å£å‘é€çš„æ•°æ®ï¼Œå¦‚æœå‘é€å¤±è´¥ï¼Œè®¾å¤‡ç«¯å¯ä»¥è·å–åˆ°è¿™ä¸ªå¤±è´¥çŠ¶æ€
+-- æ…¢å‘æ¨¡å¼å¯ä»¥è·å–åˆ°sendæ¥å£å‘é€çš„æˆåŠŸæˆ–è€…å¤±è´¥
+-- @number[opt=0] modeï¼Œæ•°æ®å‘é€æ¨¡å¼ï¼Œ0è¡¨ç¤ºæ…¢å‘ï¼Œ1è¡¨ç¤ºå¿«å‘
+-- @return nil
+-- @usage socket.setSendMode(1)
+function setSendMode(mode)
+    link.setSendMode(mode)
 end
 
---[[
-º¯ÊıÃû£ºconnect
-¹¦ÄÜ  £º´´½¨socket£¨Èç¹ûsocket²»´æÔÚ£©£¬²¢ÇÒÁ¬½Ó·şÎñÆ÷
-²ÎÊı  £º
-		idx£ºnumberÀàĞÍ£¬socket id£¬Èç¹ûÊ¹ÓÃÁËmqttÄ£¿é£¬È¡Öµ·¶Î§ÊÇ1¡¢2¡¢3£»Èç¹ûÃ»Ê¹ÓÃmqttÄ£¿é£¬È¡Öµ·¶Î§ÊÇ1¡¢2¡¢3¡¢4¡¢5¡£[±ØÑ¡]
-		prot£ºstringÀàĞÍ£¬´«Êä²ãĞ­Òé£¬Ä¿Ç°½öÖ§³Ö"TCP"ºÍ"UDP"
-		addr£ºstringÀàĞÍ£¬·şÎñÆ÷µØÖ·£¬Ö§³ÖIPµØÖ·ºÍÓòÃû
-		port£ºnumberÀàĞÍ£¬·şÎñÆ÷¶Ë¿Ú
-		rsp£ºfunctionÀàĞÍ£¬socketµÄ×´Ì¬´¦Àíº¯Êı
-		rcv£ºfunctionÀàĞÍ£¬socketµÄÊı¾İ½ÓÊÕ´¦Àíº¯Êı
-		cause£ºÔİÊ±ÎŞÓÃ£¬ºóĞøÀ©Õ¹Ê¹ÓÃ
-·µ»ØÖµ£ºtrue±íÊ¾³É¹¦µ÷ÓÃÁËÁ¬½Ó½Ó¿Ú£¨Á¬½Ó½á¹û»áÓĞÒì²½ÏûÏ¢Í¨Öªµ½socket×´Ì¬´¦Àíº¯ÊıÖĞ£©£¬false±íÊ¾Ã»ÓĞ³É¹¦µ÷ÓÃÁ¬½Ó½Ó¿Ú
-]]
-function connect(idx,prot,addr,port,rsp,rcv,cause)
-	if not checkidx(0,idx,"connect") then return end
-	local discause,sckid
-	if scks[idx] then
-		sckid = scks[idx].id
-		if link.getstate(sckid) == "CONNECTED" then
-			if scks[idx].addr == addr and scks[idx].port == port and scks[idx].prot == prot then
-				return true
-			else
-				if link.disconnect(sckid) then discause = cause	end
-			end
-		else
-			if not link.connect(sckid,prot,addr,port) then
-				print("connect fail1")
-				return false
-			end
-		end
-	else
-		sckid = link.open(sckrsp,sckrcv)
-		if not link.connect(sckid,prot,addr,port) then
-			print("connect fail2")
-			return false
-		end
-	end
-	init(idx,sckid,cause,prot,addr,port,rsp,rcv,discause)
-
-	return true
-end
-
---[[
-º¯ÊıÃû£ºsend
-¹¦ÄÜ  £º·¢ËÍÊı¾İ
-²ÎÊı  £º
-		idx£ºnumberÀàĞÍ£¬socket id£¬Èç¹ûÊ¹ÓÃÁËmqttÄ£¿é£¬È¡Öµ·¶Î§ÊÇ1¡¢2¡¢3£»Èç¹ûÃ»Ê¹ÓÃmqttÄ£¿é£¬È¡Öµ·¶Î§ÊÇ1¡¢2¡¢3¡¢4¡¢5¡£[±ØÑ¡]
-		data£ºÒª·¢ËÍµÄÊı¾İ
-		para£º·¢ËÍµÄ²ÎÊı
-		pos£ºÔİÊ±ÎŞÓÃ£¬ºóĞøÀ©Õ¹Ê¹ÓÃ
-		ins£ºÔİÊ±ÎŞÓÃ£¬ºóĞøÀ©Õ¹Ê¹ÓÃ
-·µ»ØÖµ£ºtrue±íÊ¾³É¹¦µ÷ÓÃÁË·¢ËÍ½Ó¿Ú£¨·¢ËÍ½á¹û»áÓĞÒì²½ÏûÏ¢Í¨Öªµ½socket×´Ì¬´¦Àíº¯ÊıÖĞ£©£¬false±íÊ¾Ã»ÓĞ³É¹¦µ÷ÓÃ·¢ËÍ½Ó¿Ú
-]]
-function send(idx,data,para,pos,ins)
-	if not checkidx1(idx,"send") then return end
-	if not data or string.len(data) == 0 then print("send data empty") return end
-
-	local sckid = scks[idx].id
-	local item,tail = {data = data, para = para},#scks[idx].sndpending+1
-
-	if lstate(sckid) ~= "CONNECTED" then
-		local res = link.connect(sckid,scks[idx].prot,scks[idx].addr,scks[idx].port)
-		if res or (not res and ins) then
-			table.insert(scks[idx].sndpending,pos or tail,item)
-		else
-			return
-		end
-	else
-		if scks[idx].sndingitem.data or scks[idx].waitingrspitem.data then
-			table.insert(scks[idx].sndpending,pos or tail,item)
-		else
-			if link.send(sckid,data) then  --·¢ËÍÊı¾İ
-				scks[idx].sndingitem = item
-			else
-				return
-			end
-		end
-	end
-	return true
-end
-
---[[
-º¯ÊıÃû£ºdisconnect
-¹¦ÄÜ  £º¶Ï¿ªÒ»¸ösocketÁ¬½Ó
-²ÎÊı  £º
-		idx£ºnumberÀàĞÍ£¬socket id£¬Èç¹ûÊ¹ÓÃÁËmqttÄ£¿é£¬È¡Öµ·¶Î§ÊÇ1¡¢2¡¢3£»Èç¹ûÃ»Ê¹ÓÃmqttÄ£¿é£¬È¡Öµ·¶Î§ÊÇ1¡¢2¡¢3¡¢4¡¢5¡£[±ØÑ¡]
-		cause£ºÄ¿Ç°ÎŞÓÃ£¬ºóĞøÀ©Õ¹Ê¹ÓÃ[¿ÉÑ¡]
-·µ»ØÖµ£ºtrue±íÊ¾³É¹¦µ÷ÓÃÁË¶Ï¿ª½Ó¿Ú£¨¶Ï¿ª½á¹û»áÓĞÒì²½ÏûÏ¢Í¨Öªµ½socketµÄ×´Ì¬´¦Àíº¯ÊıÖĞ£©£¬false±íÊ¾Ã»ÓĞ³É¹¦µ÷ÓÃ¶Ï¿ª½Ó¿Ú
-]]
-function disconnect(idx,cause)
-	if not checkidx1(idx,"disconnect") then return end
-	scks[idx].discause = cause
-	return link.disconnect(scks[idx].id) --¹Ø±ÕÁ¬½Ó
-end
-
---[[
-º¯ÊıÃû£ºclose
-¹¦ÄÜ  £º¶Ï¿ªÒ»¸ösocketÁ¬½Ó,²¢ÇÒÏú»Ù
-²ÎÊı  £º
-		idx£ºnumberÀàĞÍ£¬socket id£¬Èç¹ûÊ¹ÓÃÁËmqttÄ£¿é£¬È¡Öµ·¶Î§ÊÇ1¡¢2¡¢3£»Èç¹ûÃ»Ê¹ÓÃmqttÄ£¿é£¬È¡Öµ·¶Î§ÊÇ1¡¢2¡¢3¡¢4¡¢5¡£[±ØÑ¡]
-·µ»ØÖµ£ºtrue±íÊ¾³É¹¦µ÷ÓÃÁË¶Ï¿ª½Ó¿Ú£¨¶Ï¿ª½á¹û»áÓĞÒì²½ÏûÏ¢Í¨Öªµ½socketµÄ×´Ì¬´¦Àíº¯ÊıÖĞ£©£¬false±íÊ¾Ã»ÓĞ³É¹¦µ÷ÓÃ¶Ï¿ª½Ó¿Ú
-]]
-function close(idx)
-	if not checkidx1(idx,"close") then return end
-	return link.close(scks[idx].id) --Ïú»ÙÁ¬½Ó
-end
-
-function isactive(idx)
-	if not checkidx1(idx,"isactive") then return end	
-	return link.getstate(scks[idx].id) == "CONNECTED"
-end
-
---ºÜÔçÒÔÇ°coreÄÚ²¿ÓĞbug£¬Á¬½ÓºóÌ¨Ê±£¬ºÜ³¤Ê±¼ä¶¼Ã»ÓĞµÃµ½Á¬½Ó½á¹ûµÄ·´À¡£¬µ±Ê±²ÉÈ¡µÄlua¹æ±Ü´¦ÀíµÄ·½Ê½£¬Èç¹û90ÃëÃ»ÓĞ·´À¡£¬¾ÍÈ¥ÖØÆôÈí¼ş
---×îĞÂµÄcoreÒÑ¾­½â¾öÁËÕâ¸öÎÊÌâ£¬luaµÄÕâ¸ö¹æ±Ü´ëÊ©Ò²Ã»È¥µô£¬±£Áô×ÅÖ»ÊÇ¶àÒ»²ã±£ÏÕ°É
-link.setconnectnoretrestart(true,90000)
-
+setTcpResendPara(4, 16)

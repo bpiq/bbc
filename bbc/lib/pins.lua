@@ -1,163 +1,90 @@
---[[
-Ä£¿éÃû³Æ£ºÒı½ÅÅäÖÃ¹ÜÀí
-Ä£¿é¹¦ÄÜ£ºÒı½ÅÊä³ö¡¢ÊäÈë¡¢ÖĞ¶ÏµÄÅäÖÃºÍ¹ÜÀí
-Ä£¿é×îºóĞŞ¸ÄÊ±¼ä£º2017.03.04
-]]
-
-module(...,package.seeall)
-
-local allpins = {}
-
---[[
-º¯ÊıÃû£ºinit
-¹¦ÄÜ  £º³õÊ¼»¯allpins±íÖĞµÄËùÓĞÒı½Å
-²ÎÊı  £ºÎŞ  
-·µ»ØÖµ£ºÎŞ
-]]
-local function init()
-	for _,v in ipairs(allpins) do
-		if v.init == false then
-			-- ²»×ö³õÊ¼»¯
-		elseif (v.ptype == nil or v.ptype == "GPIO") and not v.inited then
-			v.inited = true
-			pio.pin.setdir(v.dir or pio.OUTPUT,v.pin)
-			--[[if v.dir == nil or v.dir == pio.OUTPUT then
-				set(v.defval or false,v)
-			else]]
-			if v.dir == pio.INPUT or v.dir == pio.INT then
-				v.val = pio.pin.getval(v.pin) == v.valid
-			end
-		--[[elseif v.set then
-			set(v.defval or false,v)]]
-		end
-	end
+--- æ¨¡å—åŠŸèƒ½ï¼šGPIO åŠŸèƒ½é…ç½®ï¼ŒåŒ…æ‹¬è¾“å…¥è¾“å‡ºIOå’Œä¸Šå‡ä¸‹é™æ²¿ä¸­æ–­IO
+-- @module pins
+-- @author openLuat
+-- @license MIT
+-- @copyright openLuat
+-- @release 2017.09.23 11:34
+require "sys"
+module(..., package.seeall)
+local interruptCallbacks = {}
+local dirs = {}
+--- é…ç½®GPIOæ¨¡å¼
+-- @number pinï¼ŒGPIO ID
+-- GPIO 0åˆ°GPIO 31è¡¨ç¤ºä¸ºpio.P0_0åˆ°pio.P0_31
+-- GPIO 32åˆ°GPIO XXè¡¨ç¤ºä¸ºpio.P1_0åˆ°pio.P1_(XX-32)ï¼Œä¾‹å¦‚GPIO33 è¡¨ç¤ºä¸ºpio.P1_1
+-- @param valï¼Œnumberã€nilæˆ–è€…functionç±»å‹
+-- é…ç½®ä¸ºè¾“å‡ºæ¨¡å¼æ—¶ï¼Œä¸ºnumberç±»å‹ï¼Œè¡¨ç¤ºé»˜è®¤ç”µå¹³ï¼Œ0æ˜¯ä½ç”µå¹³ï¼Œ1æ˜¯é«˜ç”µå¹³
+-- é…ç½®ä¸ºè¾“å…¥æ¨¡å¼æ—¶ï¼Œä¸ºnil
+-- é…ç½®ä¸ºä¸­æ–­æ¨¡å¼æ—¶ï¼Œä¸ºfunctionç±»å‹ï¼Œè¡¨ç¤ºä¸­æ–­å¤„ç†å‡½æ•°
+-- @param pull, number, pio.PULLUPï¼šä¸Šæ‹‰æ¨¡å¼ ã€‚pio.PULLDOWNï¼šä¸‹æ‹‰æ¨¡å¼ã€‚pio.NOPULLï¼šé«˜é˜»æ€
+-- å¦‚æœæ²¡æœ‰è®¾ç½®æ­¤å‚æ•°ï¼Œé»˜è®¤çš„ä¸Šä¸‹æ‹‰å‚è€ƒæ¨¡å—çš„ç¡¬ä»¶è®¾è®¡è¯´æ˜ä¹¦
+-- @return function
+-- é…ç½®ä¸ºè¾“å‡ºæ¨¡å¼æ—¶ï¼Œè¿”å›çš„å‡½æ•°ï¼Œå¯ä»¥è®¾ç½®IOçš„ç”µå¹³
+-- é…ç½®ä¸ºè¾“å…¥æˆ–è€…ä¸­æ–­æ¨¡å¼æ—¶ï¼Œè¿”å›çš„å‡½æ•°ï¼Œå¯ä»¥å®æ—¶è·å–IOçš„ç”µå¹³
+-- @usage setOutputFnc = pins.setup(pio.P1_1,0)ï¼Œé…ç½®GPIO 33ï¼Œè¾“å‡ºæ¨¡å¼ï¼Œé»˜è®¤è¾“å‡ºä½ç”µå¹³ï¼›
+--æ‰§è¡ŒsetOutputFnc(0)å¯è¾“å‡ºä½ç”µå¹³ï¼Œæ‰§è¡ŒsetOutputFnc(1)å¯è¾“å‡ºé«˜ç”µå¹³
+-- @usage getInputFnc = pins.setup(pio.P1_1,intFnc)ï¼Œé…ç½®GPIO33ï¼Œä¸­æ–­æ¨¡å¼
+-- äº§ç”Ÿä¸­æ–­æ—¶è‡ªåŠ¨è°ƒç”¨intFnc(msg)å‡½æ•°ï¼šä¸Šå‡æ²¿ä¸­æ–­æ—¶ï¼šmsgä¸ºcpu.INT_GPIO_POSEDGEï¼›ä¸‹é™æ²¿ä¸­æ–­æ—¶ï¼šmsgä¸ºcpu.INT_GPIO_NEGEDGE
+-- æ‰§è¡ŒgetInputFnc()å³å¯è·å¾—å½“å‰ç”µå¹³ï¼›å¦‚æœæ˜¯ä½ç”µå¹³ï¼ŒgetInputFnc()è¿”å›0ï¼›å¦‚æœæ˜¯é«˜ç”µå¹³ï¼ŒgetInputFnc()è¿”å›1
+-- @usage getInputFnc = pins.setup(pio.P1_1),é…ç½®GPIO33ï¼Œè¾“å…¥æ¨¡å¼
+--æ‰§è¡ŒgetInputFnc()å³å¯è·å¾—å½“å‰ç”µå¹³ï¼›å¦‚æœæ˜¯ä½ç”µå¹³ï¼ŒgetInputFnc()è¿”å›0ï¼›å¦‚æœæ˜¯é«˜ç”µå¹³ï¼ŒgetInputFnc()è¿”å›1
+function setup(pin, val, pull)
+    -- å…³é—­è¯¥IO
+    pio.pin.close(pin)
+    -- ä¸­æ–­æ¨¡å¼é…ç½®
+    if type(val) == "function" then
+        pio.pin.setdir(pio.INT, pin)
+        if pull then pio.pin.setpull(pull or pio.PULLUP, pin) end
+        --æ³¨å†Œå¼•è„šä¸­æ–­çš„å¤„ç†å‡½æ•°
+        interruptCallbacks[pin] = val
+        dirs[pin] = false
+        return function()
+            return pio.pin.getval(pin)
+        end
+    end
+    -- è¾“å‡ºæ¨¡å¼åˆå§‹åŒ–é»˜è®¤é…ç½®
+    if val ~= nil then
+        dirs[pin] = true
+        pio.pin.setdir(val == 1 and pio.OUTPUT1 or pio.OUTPUT, pin)
+    else
+        -- è¾“å…¥æ¨¡å¼åˆå§‹åŒ–é»˜è®¤é…ç½®
+        dirs[pin] = false
+        pio.pin.setdir(pio.INPUT, pin)
+        if pull then pio.pin.setpull(pull or pio.PULLUP, pin) end
+    end
+    -- è¿”å›ä¸€ä¸ªè‡ªåŠ¨åˆ‡æ¢è¾“å…¥è¾“å‡ºæ¨¡å¼çš„å‡½æ•°
+    return function(val, changeDir)
+        val = tonumber(val)
+        if (not val and dirs[pin]) or (val and not dirs[pin]) then
+            pio.pin.close(pin)
+            pio.pin.setdir(val and (val == 1 and pio.OUTPUT1 or pio.OUTPUT) or pio.INPUT, pin)
+            if not val and pull then pio.pin.setpull(pull or pio.PULLUP, pin) end
+            dirs[pin] = val and true or false
+            return val or pio.pin.getval(pin)
+        end
+        if val then
+            pio.pin.setval(val, pin)
+            return val
+        else
+            return pio.pin.getval(pin)
+        end
+    end
 end
 
---[[
-º¯ÊıÃû£ºreg
-¹¦ÄÜ  £º×¢²áÒ»¸ö»òÕß¶à¸öPIN½ÅµÄÅäÖÃ£¬²¢ÇÒ³õÊ¼»¯PIN½Å
-²ÎÊı  £º
-		cfg1£ºPIN½ÅÅäÖÃ£¬tableÀàĞÍ		
-		...£º0¸ö»ò¶à¸öPIN½ÅÅäÖÃ
-·µ»ØÖµ£ºÎŞ
-]]
-function reg(cfg1,...)
-	table.insert(allpins,cfg1)
-	local i
-	for i=1,arg.n do
-		table.insert(allpins,unpack(arg,i,i))
-		print("reg",unpack(arg,i,i).pin)
-	end
-	init()
+--- å…³é—­GPIOæ¨¡å¼
+-- @number pinï¼ŒGPIO ID
+--
+-- GPIO 0åˆ°GPIO 31è¡¨ç¤ºä¸ºpio.P0_0åˆ°pio.P0_31
+--
+-- GPIO 32åˆ°GPIO XXè¡¨ç¤ºä¸ºpio.P1_0åˆ°pio.P1_(XX-32)ï¼Œä¾‹å¦‚GPIO33 è¡¨ç¤ºä¸ºpio.P1_1
+-- @usage pins.close(pio.P1_1)ï¼Œå…³é—­GPIO33
+function close(pin)
+    pio.pin.close(pin)
 end
 
---[[
-º¯ÊıÃû£ºdereg
-¹¦ÄÜ  £º½â×¢²áÒ»¸ö»òÕß¶à¸öPIN½ÅµÄÅäÖÃ£¬²¢ÇÒ¹Ø±ÕPIN½Å
-²ÎÊı  £º
-		cfg1£ºPIN½ÅÅäÖÃ£¬tableÀàĞÍ		
-		...£º0¸ö»ò¶à¸öPIN½ÅÅäÖÃ
-·µ»ØÖµ£ºÎŞ
-]]
-function dereg(cfg1,...)
-	pio.pin.close(cfg1.pin)
-	for k,v in pairs(allpins) do
-		if v.pin==cfg1.pin then
-			table.remove(allpins,k)
-		end
-	end
-	
-	local i
-	for i=1,arg.n do
-		for k,v in pairs(allpins) do
-			if v.pin==unpack(arg,i,i).pin then
-				pio.pin.close(v.pin)
-				table.remove(allpins,k)
-				print("dereg",v.pin)
-			end
-		end
-	end
-end
-
---[[
-º¯ÊıÃû£ºget
-¹¦ÄÜ  £º¶ÁÈ¡ÊäÈë»òÖĞ¶ÏĞÍÒı½ÅµÄµçÆ½×´Ì¬
-²ÎÊı  £º  
-        p£º Òı½ÅµÄÃû×Ö
-·µ»ØÖµ£ºÈç¹ûÒı½ÅµÄµçÆ½ºÍÒı½ÅÅäÖÃµÄvalidµÄÖµÒ»ÖÂ£¬·µ»Øtrue£»·ñÔò·µ»Øfalse
-]]
-function get(p)
-	return pio.pin.getval(p.pin) == p.valid
-end
-
---[[
-º¯ÊıÃû£ºset
-¹¦ÄÜ  £ºÉèÖÃÊä³öĞÍÒı½ÅµÄµçÆ½×´Ì¬
-²ÎÊı  £º  
-        bval£ºtrue±íÊ¾ºÍÅäÖÃµÄvalidÖµÒ»ÑùµÄµçÆ½×´Ì¬£¬false±íÊ¾Ïà·´×´Ì¬
-		p£º Òı½ÅµÄÃû×Ö
-·µ»ØÖµ£ºÎŞ
-]]
-function set(bval,p)
-	p.val = bval
-
-	if not p.inited and (p.ptype == nil or p.ptype == "GPIO") then
-		p.inited = true
-		pio.pin.setdir(p.dir or pio.OUTPUT,p.pin)
-	end
-
-	if p.set then p.set(bval,p) return end
-
-	if p.ptype ~= nil and p.ptype ~= "GPIO" then print("unknwon pin type:",p.ptype) return end
-
-	local valid = p.valid == 0 and 0 or 1 -- Ä¬ÈÏ¸ßÓĞĞ§
-	local notvalid = p.valid == 0 and 1 or 0
-	local val = bval == true and valid or notvalid
-
-	if p.pin then pio.pin.setval(val,p.pin) end
-end
-
---[[
-º¯ÊıÃû£ºsetdir
-¹¦ÄÜ  £ºÉèÖÃÒı½ÅµÄ·½Ïò
-²ÎÊı  £º  
-        dir£ºpio.OUTPUT¡¢pio.OUTPUT1¡¢pio.INPUT»òÕßpio.INT£¬ÏêÏ¸ÒâÒå²Î¿¼±¾ÎÄ¼şÉÏÃæµÄ¡°dirÖµ¶¨Òå¡±
-		p£º Òı½ÅµÄÃû×Ö
-·µ»ØÖµ£ºÎŞ
-]]
-function setdir(dir,p)
-	if p and p.ptype == nil or p.ptype == "GPIO" then
-		if not p.inited then
-			p.inited = true
-		end
-		if p.pin then
-			pio.pin.close(p.pin)
-			pio.pin.setdir(dir,p.pin)
-			p.dir = dir
-		end
-	end
-end
-
-
---[[
-º¯ÊıÃû£ºintmsg
-¹¦ÄÜ  £ºÖĞ¶ÏĞÍÒı½ÅµÄÖĞ¶Ï´¦Àí³ÌĞò£¬»áÅ×³öÒ»¸öÂß¼­ÖĞ¶ÏÏûÏ¢¸øÆäËûÄ£¿éÊ¹ÓÃ
-²ÎÊı  £º  
-        msg£ºtableÀàĞÍ£»msg.int_id£ºÖĞ¶ÏµçÆ½ÀàĞÍ£¬cpu.INT_GPIO_POSEDGE±íÊ¾¸ßµçÆ½ÖĞ¶Ï£»msg.int_resnum£ºÖĞ¶ÏµÄÒı½Åid
-·µ»ØÖµ£ºÎŞ
-]]
-local function intmsg(msg)
-	local status = 0
-
-	if msg.int_id == cpu.INT_GPIO_POSEDGE then status = 1 end
-
-	for _,v in ipairs(allpins) do
-		if v.dir == pio.INT and msg.int_resnum == v.pin then
-			v.val = v.valid == status
-			if v.intcb then v.intcb(v.val) end
-			return
-		end
-	end
-end
---×¢²áÒı½ÅÖĞ¶ÏµÄ´¦Àíº¯Êı
-sys.regmsg(rtos.MSG_INT,intmsg)
+rtos.on(rtos.MSG_INT, function(msg)
+    if interruptCallbacks[msg.int_resnum] == nil then
+        log.warn('pins.rtos.on', 'warning:rtos.MSG_INT callback nil', msg.int_resnum)
+    end
+    interruptCallbacks[msg.int_resnum](msg.int_id)
+end)

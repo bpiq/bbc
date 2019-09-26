@@ -1,317 +1,167 @@
---[[
-Ä£¿éÃû³Æ£º»ùÕ¾ĞÅÏ¢×ª¾­Î³¶È
-Ä£¿é¹¦ÄÜ£ºÁ¬½Ó»ùÕ¾¶¨Î»ºóÌ¨£¬ÉÏ±¨¶à»ùÕ¾¸øºóÌ¨£¬ºóÌ¨·µ»Ø¾­Î³¶È
-Ä£¿é×îºóĞŞ¸ÄÊ±¼ä£º2017.05.05
-]]
+--- æ¨¡å—åŠŸèƒ½ï¼šæ ¹æ®åŸºç«™ä¿¡æ¯æŸ¥è¯¢ç»çº¬åº¦
+-- @module lbsLoc
+-- @author openLuat
+-- @license MIT
+-- @copyright openLuat
+-- @release 2018.03.25
 
---¶¨ÒåÄ£¿é,µ¼ÈëÒÀÀµ¿â
-local base = _G
-local string = require"string"
-local table = require"table"
-local lpack = require"pack"
-local bit = require"bit"
-local sys  = require"sys"
-local link = require"link"
-local misc = require"misc"
-local common = require"common"
-local net = require"net"
-module(...)
+require"socket"
+require"utils"
+require"common"
+require"misc"
+module(..., package.seeall)
 
---¼ÓÔØ³£ÓÃµÄÈ«¾Öº¯ÊıÖÁ±¾µØ
-local print,tonumber,pairs = base.print,base.tonumber,base.pairs
-local slen,sbyte,ssub,srep = string.len,string.byte,string.sub,string.rep
+local function enCellInfo(s)
+    local ret,t,mcc,mnc,lac,ci,rssi,k,v,m,n,cntrssi = "",{}
+    log.info("lbsLoc.enCellInfo",s)
+    for mcc,mnc,lac,ci,rssi in string.gmatch(s,"(%d+)%.(%d+)%.(%d+)%.(%d+)%.(%d+);") do
+        mcc,mnc,lac,ci,rssi = tonumber(mcc),tonumber(mnc),tonumber(lac),tonumber(ci),(tonumber(rssi) > 31) and 31 or tonumber(rssi)
+        local handle = nil
+        for k,v in pairs(t) do
+            if v.lac == lac and v.mcc == mcc and v.mnc == mnc then
+                if #v.rssici < 8 then
+                    table.insert(v.rssici,{rssi=rssi,ci=ci})
+                end
+                handle = true
+                break
+            end
+        end
+        if not handle then
+            table.insert(t,{mcc=mcc,mnc=mnc,lac=lac,rssici={{rssi=rssi,ci=ci}}})
+        end
+    end
+    for k,v in pairs(t) do
+        ret = ret .. pack.pack(">HHb",v.lac,v.mcc,v.mnc)
+        for m,n in pairs(v.rssici) do
+            cntrssi = bit.bor(bit.lshift(((m == 1) and (#v.rssici-1) or 0),5),n.rssi)
+            ret = ret .. pack.pack(">bH",cntrssi,n.ci)
+        end
+    end
 
-local PROTOCOL,SERVER,PORT = "UDP","bs.openluat.com","12411"
-
---GETÃüÁîµÈ´ıÊ±¼ä
-local CMD_GET_TIMEOUT = 5000
---´íÎó°ü(¸ñÊ½²»¶Ô) ÔÚÒ»¶ÎÊ±¼äºó½øĞĞÖØĞÂ»ñÈ¡
-local ERROR_PACK_TIMEOUT = 5000
--- Ã¿´ÎGETÃüÁîÖØÊÔ´ÎÊı
-local CMD_GET_RETRY_TIMES = 3
---socket id
-local lid
---Á¬½Ó×´Ì¬£¬Á¬½ÓÒÑ¾­Ïú»ÙÔòÎªfalse»òÕßnil£¬ÆäÓàÎªtrue
-local linksta,usercb,userlocstr
---getretries£º»ñÈ¡Ã¿¸ö°üÒÑ¾­ÖØÊÔµÄ´ÎÊı
-local getretries = 0
-
---[[
-º¯ÊıÃû£ºprint
-¹¦ÄÜ  £º´òÓ¡½Ó¿Ú£¬´ËÎÄ¼şÖĞµÄËùÓĞ´òÓ¡¶¼»á¼ÓÉÏlbslocÇ°×º
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-local function print(...)
-	base.print("lbsloc",...)
+    return string.char(#t)..ret
 end
 
---[[
-º¯ÊıÃû£ºretry
-¹¦ÄÜ  £ºÇëÇó¹ı³ÌÖĞµÄÖØÊÔ¶¯×÷
-²ÎÊı  £º
-·µ»ØÖµ£ºÎŞ
-]]
-local function retry()
-	print("retry",getretries)
-	--ÖØÊÔ´ÎÊı¼Ó1
-	getretries = getretries + 1
-	if getretries < CMD_GET_RETRY_TIMES then
-		-- Î´´ïÖØÊÔ´ÎÊı,¼ÌĞøÖØÊÔ
-		reqget()
-	else
-		-- ³¬¹ıÖØÊÔ´ÎÊı,Éı¼¶Ê§°Ü
-		reqend(false)
-	end
+local function enWifiInfo(tWifi)
+    local ret,cnt,k,v = "",0
+    if tWifi then
+        for k,v in pairs(tWifi) do
+            log.info("lbsLoc.enWifiInfo",k,v)
+            ret = ret..pack.pack("Ab",(k:gsub(":","")):fromHex(),v+255)
+            cnt = cnt+1
+        end
+    end
+    return (tWifi and string.char(cnt) or "")..ret
 end
 
-local function encellinfo(s)
-	local ret,t,mcc,mnc,lac,ci,rssi,k,v,m,n,cntrssi = "",{}
-	print("encellinfo",s)
-	for mcc,mnc,lac,ci,rssi in string.gmatch(s,"(%d+)%.(%d+)%.(%d+)%.(%d+)%.(%d+);") do
-		mcc,mnc,lac,ci,rssi = tonumber(mcc),tonumber(mnc),tonumber(lac),tonumber(ci),(tonumber(rssi) > 31) and 31 or tonumber(rssi)
-		local handle = nil
-		for k,v in pairs(t) do
-			if v.lac == lac and v.mcc == mcc and v.mnc == mnc then
-				if #v.rssici < 8 then
-					table.insert(v.rssici,{rssi=rssi,ci=ci})
-				end
-				handle = true
-				break
-			end
-		end
-		if not handle then
-			table.insert(t,{mcc=mcc,mnc=mnc,lac=lac,rssici={{rssi=rssi,ci=ci}}})
-		end
-	end
-	for k,v in pairs(t) do
-		ret = ret .. lpack.pack(">HHb",v.lac,v.mcc,v.mnc)
-		for m,n in pairs(v.rssici) do
-			cntrssi = bit.bor(bit.lshift(((m == 1) and (#v.rssici-1) or 0),5),n.rssi)
-			ret = ret .. lpack.pack(">bH",cntrssi,n.ci)
-		end
-	end
-
-	return string.char(#t)..ret
-end
-
-local function bcd(d,n)
-	local l = slen(d or "")
-	local num
-	local t = {}
-
-	for i=1,l,2 do
-		num = tonumber(ssub(d,i,i+1),16)
-
-		if i == l then
-			num = 0xf0+num
-		else
-			num = (num%0x10)*0x10 + (num-(num%0x10))/0x10
-		end
-
-		table.insert(t,num)
-	end
-
-	local s = string.char(base.unpack(t))
-
-	l = slen(s)
-
-	if l < n then
-		s = s .. string.rep("\255",n-l)
-	elseif l > n then
-		s = ssub(s,1,n)
-	end
-
-	return s
-end
-
---460.01.6311.49234.30;460.01.6311.49233.23;460.02.6322.49232.18;
-local function getcellcb(s)
-	print("getcellcb")
-	local status = (misc.isnvalid() and 1 or 0) + (userlocstr and 1 or 0)*2
-	local dsecret = ""
-	if misc.isnvalid() then
-		dsecret = lpack.pack("bA",slen(misc.getsn()),misc.getsn())
-	end
-	base.assert(base.PRODUCT_KEY,"undefine PRODUCT_KEY in main.lua")
-	link.send(lid,lpack.pack("bAbAAA",slen(base.PRODUCT_KEY),base.PRODUCT_KEY,status,dsecret,bcd(misc.getimei(),8),encellinfo(s)))
-	--Æô¶¯¡°CMD_GET_TIMEOUTºÁÃëºóÖØÊÔ¡±¶¨Ê±Æ÷
-	sys.timer_start(retry,CMD_GET_TIMEOUT)
-end
-
---[[
-º¯ÊıÃû£ºreqget
-¹¦ÄÜ  £º·¢ËÍ»ùÕ¾ĞÅÏ¢µ½·şÎñÆ÷
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-function reqget()
-	print("reqget")
-	net.getmulticell(getcellcb)
-end
-
---[[
-º¯ÊıÃû£ºreqend
-¹¦ÄÜ  £º»ñÈ¡½áÊø
-²ÎÊı  £º
-		suc£º½á¹û£¬trueÎª³É¹¦£¬ÆäÓàÎªÊ§°Ü
-·µ»ØÖµ£ºÎŞ
-]]
-function reqend(suc)
-	print("reqend",suc)
-	--Í£Ö¹ÖØÊÔ¶¨Ê±Æ÷
-	sys.timer_stop(retry)
-	--¶Ï¿ªÁ´½Ó
-	link.close(lid)
-	linksta = false
-	if not suc then
-		local tmpcb=usercb
-		usercb=nil
-		sys.timer_stop(tmoutfnc)
-		if tmpcb then tmpcb(4) end
-	end	
-end
-
---[[
-º¯ÊıÃû£ºnofity
-¹¦ÄÜ  £ºsocket×´Ì¬µÄ´¦Àíº¯Êı
-²ÎÊı  £º
-        id£ºsocket id£¬³ÌĞò¿ÉÒÔºöÂÔ²»´¦Àí
-        evt£ºÏûÏ¢ÊÂ¼şÀàĞÍ
-		val£º ÏûÏ¢ÊÂ¼ş²ÎÊı
-·µ»ØÖµ£ºÎŞ
-]]
-local function nofity(id,evt,val)
-	--Á¬½Ó½á¹û
-	if evt == "CONNECT" then
-		--Á¬½Ó³É¹¦
-		if val == "CONNECT OK" then
-			getretries = 0
-			reqget()
-		--Á¬½ÓÊ§°Ü
-		else
-			reqend(false)
-		end
-	--Á¬½Ó±»¶¯¶Ï¿ª
-	elseif evt == "STATE" and (val=="CLOSED" or val=="SHUTED") then
-		reqend(false)
-	end
-end
-
-local function unbcd(d)
-	local byte,v1,v2
-	local t = {}
-
-	for i=1,slen(d) do
-		byte = sbyte(d,i)
-		v1,v2 = bit.band(byte,0x0f),bit.band(bit.rshift(byte,4),0x0f)
-
-		if v1 == 0x0f then break end
-		table.insert(t,v1)
-
-		if v2 == 0x0f then break end
-		table.insert(t,v2)
-	end
-
-	return table.concat(t)
-end
-
-local function trans(lat,lng)
-	local la,ln = lat,lng
-	if slen(lat)>10 then
-		la = ssub(lat,1,10)
-	elseif slen(lat)<10 then
-		la = lat..srep("0",10-slen(lat))
-	end
-	if slen(lng)>10 then
-		ln = ssub(lng,1,10)
-	elseif slen(lng)<10 then
-		ln = lng..srep("0",10-slen(lng))
-	end
-
---[[	
-0.XXXXXXX¶È³ËÒÔ60¾ÍÊÇ·Ö£¬ÎÒÃÇµÄLuat²»Ö§³ÖĞ¡Êı£¬°´ÕÕÏÂÃæµÄ¸ñÊ½¼ÆËã£º
-0.XXXXXXX * 60 = XXXXXXX * 60 / 10000000 = XXXXXXX * 6 / 1000000
-
-ÀıÈç0.9999999¶È = 9999999 * 6 / 1000000 = 59.999994·Ö
-
-
-×îÖÕ°´ÕÕÏÂÃæµÄ²âÊÔ¼ÆËã·Ö£º
-(XXXXXXX * 6 / 1000000).."."..(XXXXXXX * 6 % 1000000)µÃµ½µÄ¾ÍÊÇstringÀàĞÍµÄ·Ö£¬
-ÀıÈç0.9999999¶È×îÖÕ½á¹û¾ÍÊÇstringÀàĞÍµÄ59.999994·Ö
-]]
-	local lam1,lam2 = (tonumber(ssub(la,4,-1))*6-(tonumber(ssub(la,4,-1))*6%1000000))/1000000,tonumber(ssub(la,4,-1))*6%1000000
-	if slen(lam1)<2 then lam1 = srep("0",2-slen(lam1))..lam1 end
-	if slen(lam2)<6 then lam2 = srep("0",6-slen(lam2))..lam2 end
+local function trans(str)
+    local s = str
+    if str:len()<10 then
+        s = str..string.rep("0",10-str:len())
+    end
 	
-	local lnm1,lnm2 = (tonumber(ssub(ln,4,-1))*6-(tonumber(ssub(ln,4,-1))*6%1000000))/1000000,tonumber(ssub(ln,4,-1))*6%1000000
-	if slen(lnm1)<2 then lnm1 = srep("0",2-slen(lnm1))..lnm1 end
-	if slen(lnm2)<6 then lnm2 = srep("0",6-slen(lnm2))..lnm2 end
-	
-	return ssub(la,1,3).."."..ssub(la,4,-1),ssub(ln,1,3).."."..ssub(ln,4,-1),ssub(la,1,3)..lam1.."."..lam2,ssub(ln,1,3)..lnm1.."."..lnm2
+    return s:sub(1,3).."."..s:sub(4,10)
 end
 
-local function printErr(result)
-	print("¸ù¾İ»ùÕ¾²éÑ¯¾­Î³¶ÈÊ§°Ü")
-	if result==2 then
-		print("main.luaÖĞµÄPRODUCT_KEYºÍ´ËÉè±¸ÔÚiot.openluat.comÖĞËùÊôÏîÄ¿µÄProductKey±ØĞëÒ»ÖÂ£¬ÇëÈ¥¼ì²é")
-	else
-		print("»ùÕ¾Êı¾İ¿â²éÑ¯²»µ½ËùÓĞĞ¡ÇøµÄÎ»ÖÃĞÅÏ¢")
-		print("ÔÚtraceÖĞÏòÉÏËÑË÷encellinfo£¬È»ºóÔÚµçÄÔä¯ÀÀÆ÷ÖĞ´ò¿ªhttp://bs.openluat.com/£¬ÊÖ¶¯²éÕÒencellinfoºóµÄËùÓĞĞ¡ÇøÎ»ÖÃ")
-		print("Èç¹ûÊÖ¶¯¿ÉÒÔ²éµ½Î»ÖÃ£¬Ôò·şÎñÆ÷´æÔÚBUG£¬Ö±½ÓÏò¼¼ÊõÈËÔ±·´Ó³ÎÊÌâ")
-		print("Èç¹ûÊÖ¶¯ÎŞ·¨²éµ½Î»ÖÃ£¬Ôò»ùÕ¾Êı¾İ¿â»¹Ã»ÓĞÊÕÂ¼µ±Ç°Éè±¸µÄĞ¡ÇøÎ»ÖÃĞÅÏ¢£¬Ïò¼¼ÊõÈËÔ±·´À¡£¬ÎÒÃÇ»á¾¡¿ìÊÕÂ¼")
-	end
+local function taskClient(cbFnc,reqAddr,timeout,productKey,host,port,reqTime,reqWifi)
+    while not socket.isReady() do
+        if not sys.waitUntil("IP_READY_IND",timeout) then return cbFnc(1) end
+    end
+    
+    local retryCnt,sck = 0
+    local reqStr = pack.pack("bAbAAAA",
+        productKey:len(),
+        productKey,
+        (reqAddr and 2 or 0)+(reqTime and 4 or 0)+(reqWifi and 16 or 0),
+        "",
+        common.numToBcdNum(misc.getImei()),
+        enCellInfo(net.getCellInfoExt()),
+        enWifiInfo(reqWifi))
+    log.info("reqStr",reqStr:toHex())
+    while true do
+        sck = socket.udp()
+        if not sck then cbFnc(6) return end
+        if sck:connect(host,port) then
+            while true do
+                if sck:send(reqStr) then
+                    local result,data = sck:recv(5000)
+                    if result then                        
+                        sck:close()
+                        log.info("lbcLoc receive",data:toHex())
+                        if data:len()>=11 and (data:byte(1)==0 or data:byte(1)==0xFF) then
+                            cbFnc(0,
+                                trans(common.bcdNumToNum(data:sub(2,6))),
+                                trans(common.bcdNumToNum(data:sub(7,11))),
+                                reqAddr and data:sub(13,12+data:byte(12)) or nil,
+                                data:sub(reqAddr and (13+data:byte(12)) or 12,-1),
+                                (data:byte(1)==0) and "LBS" or "WIFI")
+                        else
+                            log.warn("lbsLoc.query","æ ¹æ®åŸºç«™æŸ¥è¯¢ç»çº¬åº¦å¤±è´¥")
+                            if data:byte(1)==2 then
+                                log.warn("lbsLoc.query","main.luaä¸­çš„PRODUCT_KEYå’Œæ­¤è®¾å¤‡åœ¨iot.openluat.comä¸­æ‰€å±é¡¹ç›®çš„ProductKeyå¿…é¡»ä¸€è‡´ï¼Œè¯·å»æ£€æŸ¥")
+                            else
+                                log.warn("lbsLoc.query","åŸºç«™æ•°æ®åº“æŸ¥è¯¢ä¸åˆ°æ‰€æœ‰å°åŒºçš„ä½ç½®ä¿¡æ¯")
+                                log.warn("lbsLoc.query","åœ¨traceä¸­å‘ä¸Šæœç´¢encellinfoï¼Œç„¶ååœ¨ç”µè„‘æµè§ˆå™¨ä¸­æ‰“å¼€http://bs.openluat.com/ï¼Œæ‰‹åŠ¨æŸ¥æ‰¾encellinfoåçš„æ‰€æœ‰å°åŒºä½ç½®")
+                                log.warn("lbsLoc.query","å¦‚æœæ‰‹åŠ¨å¯ä»¥æŸ¥åˆ°ä½ç½®ï¼Œåˆ™æœåŠ¡å™¨å­˜åœ¨BUGï¼Œç›´æ¥å‘æŠ€æœ¯äººå‘˜åæ˜ é—®é¢˜")
+                                log.warn("lbsLoc.query","å¦‚æœæ‰‹åŠ¨æ— æ³•æŸ¥åˆ°ä½ç½®ï¼Œåˆ™åŸºç«™æ•°æ®åº“è¿˜æ²¡æœ‰æ”¶å½•å½“å‰è®¾å¤‡çš„å°åŒºä½ç½®ä¿¡æ¯ï¼Œå‘æŠ€æœ¯äººå‘˜åé¦ˆï¼Œæˆ‘ä»¬ä¼šå°½å¿«æ”¶å½•")
+                            end
+                            cbFnc(5)
+                        end                        
+                        return
+                    else
+                        sck:close()
+                        retryCnt = retryCnt+1
+                        if retryCnt>=3 then return cbFnc(4) end
+                    end
+                else
+                    sck:close()
+                    retryCnt = retryCnt+1
+                    if retryCnt>=3 then return cbFnc(3) end
+                    break
+                end
+            end
+        else
+            sck:close()
+            retryCnt = retryCnt+1
+            if retryCnt>=3 then return cbFnc(2) end
+        end
+    end    
 end
 
---[[
-º¯ÊıÃû£ºrcv
-¹¦ÄÜ  £ºsocket½ÓÊÕÊı¾İµÄ´¦Àíº¯Êı
-²ÎÊı  £º
-        id £ºsocket id£¬³ÌĞò¿ÉÒÔºöÂÔ²»´¦Àí
-        data£º½ÓÊÕµ½µÄÊı¾İ
-·µ»ØÖµ£ºÎŞ
-]]
-local function rcv(id,s)
-	print("rcv",slen(s),(slen(s)<270) and common.binstohexs(s) or "")
-	local result = sbyte(s,1)
-	if slen(s)<11 then printErr(result) return end
-	reqend(true)
-	local tmpcb=usercb
-	usercb=nil
-	sys.timer_stop(tmoutfnc)	
-	if result~=0 then
-		printErr(result)
-		if tmpcb then tmpcb(3) end
-	else
-		local lat,lng,latdm,lngdm = trans(unbcd(ssub(s,2,6)),unbcd(ssub(s,7,11)))
-		if tmpcb then tmpcb(0,lat,lng,common.ucs2betogb2312(ssub(s,13,-1)),latdm,lngdm) end
-	end	
+--- å‘é€æ ¹æ®åŸºç«™æŸ¥è¯¢ç»çº¬åº¦è¯·æ±‚ï¼ˆä»…æ”¯æŒä¸­å›½åŒºåŸŸçš„ä½ç½®æŸ¥è¯¢ï¼‰
+-- @function cbFncï¼Œç”¨æˆ·å›è°ƒå‡½æ•°ï¼Œå›è°ƒå‡½æ•°çš„è°ƒç”¨å½¢å¼ä¸ºï¼š
+--              cbFnc(result,lat,lng,addr,dateTime,locType)
+--              resultï¼šnumberç±»å‹
+--                      0è¡¨ç¤ºæˆåŠŸ
+--                      1è¡¨ç¤ºç½‘ç»œç¯å¢ƒå°šæœªå°±ç»ª
+--                      2è¡¨ç¤ºè¿æ¥æœåŠ¡å™¨å¤±è´¥
+--                      3è¡¨ç¤ºå‘é€æ•°æ®å¤±è´¥
+--                      4è¡¨ç¤ºæ¥æ”¶æœåŠ¡å™¨åº”ç­”è¶…æ—¶
+--                      5è¡¨ç¤ºæœåŠ¡å™¨è¿”å›æŸ¥è¯¢å¤±è´¥
+--                      6è¡¨ç¤ºsocketå·²æ»¡ï¼Œåˆ›å»ºsocketå¤±è´¥
+--                      ä¸º0æ—¶ï¼Œåé¢çš„5ä¸ªå‚æ•°æ‰æœ‰æ„ä¹‰
+--              latï¼šstringç±»å‹æˆ–è€…nilï¼Œçº¬åº¦ï¼Œæ•´æ•°éƒ¨åˆ†3ä½ï¼Œå°æ•°éƒ¨åˆ†7ä½ï¼Œä¾‹å¦‚"031.2425864"
+--              lngï¼šstringç±»å‹æˆ–è€…nilï¼Œç»åº¦ï¼Œæ•´æ•°éƒ¨åˆ†3ä½ï¼Œå°æ•°éƒ¨åˆ†7ä½ï¼Œä¾‹å¦‚"121.4736522"
+--              addrï¼šæ— æ„ä¹‰ï¼Œä¿ç•™ä½¿ç”¨
+--              dateTimeï¼šæ— æ„ä¹‰ï¼Œä¿ç•™ä½¿ç”¨
+--              locTypeï¼šstringç±»å‹ï¼Œä½ç½®ç±»å‹ï¼Œ"LBS"è¡¨ç¤ºåŸºç«™å®šä½ä½ç½®ï¼Œ"WIFI"è¡¨ç¤ºWIFIå®šä½ä½ç½®
+-- @bool[opt=nil] reqAddrï¼Œæ­¤å‚æ•°æ— æ„ä¹‰ï¼Œä¿ç•™
+-- @number[opt=20000] timeoutï¼Œè¯·æ±‚è¶…æ—¶æ—¶é—´ï¼Œå•ä½æ¯«ç§’ï¼Œé»˜è®¤20000æ¯«ç§’
+-- @string[opt=nil] productKeyï¼ŒIOTç½‘ç«™ä¸Šçš„äº§å“è¯ä¹¦ï¼Œæ­¤å‚æ•°å¯é€‰ï¼Œç”¨æˆ·å¦‚æœåœ¨main.luaä¸­å®šä¹‰äº†PRODUCT_KEYå˜é‡ï¼Œå°±ä¸éœ€è¦ä¼ å…¥æ­¤å‚æ•°
+-- @string[opt=nil] hostï¼ŒæœåŠ¡å™¨åŸŸåï¼Œæ­¤å‚æ•°å¯é€‰ï¼Œç›®å‰ä»…libä¸­agps.luaä½¿ç”¨æ­¤å‚æ•°ã€‚ç”¨æˆ·è„šæœ¬ä¸­ä¸éœ€è¦ä¼ å…¥æ­¤å‚æ•°
+-- @string[opt=nil] portï¼ŒæœåŠ¡å™¨ç«¯å£ï¼Œæ­¤å‚æ•°å¯é€‰ï¼Œç›®å‰ä»…libä¸­agps.luaä½¿ç”¨æ­¤å‚æ•°ã€‚ç”¨æˆ·è„šæœ¬ä¸­ä¸éœ€è¦ä¼ å…¥æ­¤å‚æ•°
+-- @bool[opt=nil] reqTimeï¼Œæ˜¯å¦éœ€è¦æœåŠ¡å™¨è¿”å›æ—¶é—´ä¿¡æ¯ï¼Œtrueè¿”å›ï¼Œfalseæˆ–è€…nilä¸è¿”å›ï¼Œæ­¤å‚æ•°å¯é€‰ï¼Œç›®å‰ä»…libä¸­agps.luaä½¿ç”¨æ­¤å‚æ•°ã€‚ç”¨æˆ·è„šæœ¬ä¸­ä¸éœ€è¦ä¼ å…¥æ­¤å‚æ•°
+-- @table[opt=nil] reqWifiï¼Œæœç´¢åˆ°çš„WIFIçƒ­ç‚¹ä¿¡æ¯(MACåœ°å€å’Œä¿¡å·å¼ºåº¦)ï¼Œå¦‚æœä¼ å…¥äº†æ­¤å‚æ•°ï¼Œåå°ä¼šæŸ¥è¯¢WIFIçƒ­ç‚¹å¯¹åº”çš„ç»çº¬åº¦ï¼Œæ­¤å‚æ•°æ ¼å¼å¦‚ä¸‹ï¼š
+--              {
+--                  ["1a:fe:34:9e:a1:77"] = -63,
+--                  ["8c:be:be:2d:cd:e9"] = -81,
+--                  ["20:4e:7f:82:c2:c4"] = -70,
+--              }
+-- @return nil
+-- @usage lbsLoc.request(cbFnc)
+-- @usage lbsLoc.request(cbFnc,true)
+-- @usage lbsLoc.request(cbFnc,nil,20000)
+function request(cbFnc,reqAddr,timeout,productKey,host,port,reqTime,reqWifi)
+    assert(_G.PRODUCT_KEY or productKey,"undefine PRODUCT_KEY in main.lua")    
+    sys.taskInit(taskClient,cbFnc,reqAddr,timeout or 20000,productKey or _G.PRODUCT_KEY,host or "bs.openluat.com",port or "12411",reqTime,reqWifi)
 end
 
-function tmoutfnc()
-	print("tmoutfnc")
-	local tmpcb=usercb
-	usercb=nil
-	if tmpcb then tmpcb(2) end
-end
-
---[[
-º¯ÊıÃû£ºrequest
-¹¦ÄÜ  £º·¢Æğ»ñÈ¡¾­Î³¶ÈÇëÇó
-²ÎÊı  £º
-        cb£º»ñÈ¡µ½¾­Î³¶È»òÕß³¬Ê±ºóµÄ»Øµ÷º¯Êı£¬µ÷ÓÃĞÎÊ½Îª£ºcb(result,lat,lng,location)		
-		locstr£ºÊÇ·ñÖ§³ÖÎ»ÖÃ×Ö·û´®·µ»Ø£¬trueÖ§³Ö£¬false»òÕßnil²»Ö§³Ö£¬Ä¬ÈÏ²»Ö§³Ö
-		tmout£º»ñÈ¡¾­Î³¶È³¬Ê±Ê±¼ä£¬µ¥Î»Ãë£¬Ä¬ÈÏ25Ãë
-·µ»ØÖµ£ºÎŞ
-]]
-function request(cb,locstr,tmout)
-	print("request",cb,tmout,locstr,usercb,linksta)
-	if usercb then print("request usercb err") cb(1) end
-	if not linksta then
-		lid = link.open(nofity,rcv,"lbsloc")
-		link.connect(lid,PROTOCOL,SERVER,PORT)
-		linksta = true
-	end
-	sys.timer_start(tmoutfnc,(tmout and tmout*1000 or ((CMD_GET_RETRY_TIMES+2)*CMD_GET_TIMEOUT)))
-	usercb,userlocstr = cb,locstr
-end

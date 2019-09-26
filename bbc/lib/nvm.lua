@@ -1,278 +1,260 @@
---[[
-Ä£¿éÃû³Æ£º²ÎÊı¹ÜÀí
-Ä£¿é¹¦ÄÜ£º²ÎÊı³õÊ¼»¯¡¢¶ÁĞ´ÒÔ¼°»Ö¸´³ö³§ÉèÖÃ
-Ä£¿é×îºóĞŞ¸ÄÊ±¼ä£º2017.02.23
-]]
+--- æ¨¡å—åŠŸèƒ½ï¼šå‚æ•°ç®¡ç†
+-- @module nvm
+-- @author openLuat
+-- @license MIT
+-- @copyright openLuat
+-- @release 2017.11.9
+
+require"log"
 
 module(...,package.seeall)
 
 package.path = "/?.lua;".."/?.luae;"..package.path
 
---Ä¬ÈÏ²ÎÊıÅäÖÃ´æ´¢ÔÚconfignameÎÄ¼şÖĞ
---ÊµÊ±²ÎÊıÅäÖÃ´æ´¢ÔÚparanameÎÄ¼şÖĞ
---para£ºÊµÊ±²ÎÊı±í
---config£ºÄ¬ÈÏ²ÎÊı±í
-local paraname,paranamebak,para,libdftconfig,configname,econfigname = "/para.lua","/para_bak.lua",{}
+--é»˜è®¤å‚æ•°é…ç½®å­˜å‚¨åœ¨confignameæ–‡ä»¶ä¸­
+--å®æ—¶å‚æ•°é…ç½®å­˜å‚¨åœ¨paranameæ–‡ä»¶ä¸­
+--paraï¼šå®æ—¶å‚æ•°è¡¨
+--configï¼šé»˜è®¤å‚æ•°è¡¨
+paraname,paranamebak = "/nvm_para.lua","/nvm_para_bak.lua"
+local para,libdftconfig,configname,econfigname = {}
 
 --[[
-º¯ÊıÃû£ºprint
-¹¦ÄÜ  £º´òÓ¡½Ó¿Ú£¬´ËÎÄ¼şÖĞµÄËùÓĞ´òÓ¡¶¼»á¼ÓÉÏnvmÇ°×º
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-local function print(...)
-	_G.print("nvm",...)
-end
-
---[[
-º¯ÊıÃû£ºrestore
-¹¦ÄÜ  £º²ÎÊı»Ö¸´³ö³§ÉèÖÃ£¬°ÑconfignameÎÄ¼şÖĞÄÚÈİ¸´ÖÆµ½paranameÎÄ¼şÖĞ
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-function restore()
-	os.remove(paraname)
-	os.remove(paranamebak)
-	local fpara,fconfig = io.open(paraname,"wb"),io.open(configname,"rb")
-	if not fconfig then fconfig = io.open(econfigname,"rb") end
-	fpara:write(fconfig:read("*a"))
-	fpara:close()
-	fconfig:close()
-	upd(true)
-end
-
---[[
-º¯ÊıÃû£ºserialize
-¹¦ÄÜ  £º¸ù¾İ²»Í¬µÄÊı¾İÀàĞÍ£¬°´ÕÕ²»Í¬µÄ¸ñÊ½£¬Ğ´¸ñÊ½»¯ºóµÄÊı¾İµ½ÎÄ¼şÖĞ
-²ÎÊı  £º
-		pout£ºÎÄ¼ş¾ä±ú
-		o£ºÊı¾İ
-·µ»ØÖµ£ºÎŞ
+å‡½æ•°åï¼šserialize
+åŠŸèƒ½  ï¼šæ ¹æ®ä¸åŒçš„æ•°æ®ç±»å‹ï¼ŒæŒ‰ç…§ä¸åŒçš„æ ¼å¼ï¼Œå†™æ ¼å¼åŒ–åçš„æ•°æ®åˆ°æ–‡ä»¶ä¸­
+å‚æ•°  ï¼š
+        poutï¼šæ–‡ä»¶å¥æŸ„
+        oï¼šæ•°æ®
+è¿”å›å€¼ï¼šæ— 
 ]]
 local function serialize(pout,o)
-	if type(o) == "number" then
-		--numberÀàĞÍ£¬Ö±½ÓĞ´Ô­Ê¼Êı¾İ
-		pout:write(o)	
-	elseif type(o) == "string" then
-		--stringÀàĞÍ£¬Ô­Ê¼Êı¾İ×óÓÒ¸÷¼ÓÉÏË«ÒıºÅĞ´Èë
-		pout:write(string.format("%q", o))
-	elseif type(o) == "boolean" then
-		--booleanÀàĞÍ£¬×ª»¯ÎªstringĞ´Èë
-		pout:write(tostring(o))
-	elseif type(o) == "table" then
-		--tableÀàĞÍ£¬¼Ó»»ĞĞ£¬´óÀ¨ºÅ£¬ÖĞÀ¨ºÅ£¬Ë«ÒıºÅĞ´Èë
-		pout:write("{\n")
-		for k,v in pairs(o) do
-			if type(k) == "number" then
-				pout:write(" [" .. k .. "] = ")
-			elseif type(k) == "string" then
-				pout:write(" [\"" .. k .."\"] = ")
-			else
-				error("cannot serialize table key " .. type(o))
-			end
-			serialize(pout,v)
-			pout:write(",\n")
-		end
-		pout:write("}\n")
-	else
-		error("cannot serialize a " .. type(o))
-	end
+    if type(o) == "number" then
+        --numberç±»å‹ï¼Œç›´æ¥å†™åŸå§‹æ•°æ®
+        pout:write(o)    
+    elseif type(o) == "string" then
+        --stringç±»å‹ï¼ŒåŸå§‹æ•°æ®å·¦å³å„åŠ ä¸ŠåŒå¼•å·å†™å…¥
+        pout:write(string.format("%q", o))
+    elseif type(o) == "boolean" then
+        --booleanç±»å‹ï¼Œè½¬åŒ–ä¸ºstringå†™å…¥
+        pout:write(tostring(o))
+    elseif type(o) == "table" then
+        --tableç±»å‹ï¼ŒåŠ æ¢è¡Œï¼Œå¤§æ‹¬å·ï¼Œä¸­æ‹¬å·ï¼ŒåŒå¼•å·å†™å…¥
+        pout:write("{\n")
+        for k,v in pairs(o) do
+            pout:write(" [")
+            serialize(pout, k)
+            pout:write("] = ")
+            serialize(pout, v)
+            pout:write(",\n")
+        end
+        pout:write("}\n")
+    else
+        error("cannot serialize a " .. type(o))
+    end
 end
 
 --[[
-º¯ÊıÃû£ºupd
-¹¦ÄÜ  £º¸üĞÂÊµÊ±²ÎÊı±í
-²ÎÊı  £º
-		overide£ºÊÇ·ñÓÃÄ¬ÈÏ²ÎÊıÇ¿ÖÆ¸üĞÂÊµÊ±²ÎÊı
-·µ»ØÖµ£ºÎŞ
+å‡½æ•°åï¼šupd
+åŠŸèƒ½  ï¼šæ›´æ–°å®æ—¶å‚æ•°è¡¨
+å‚æ•°  ï¼š
+        overideï¼šæ˜¯å¦ç”¨é»˜è®¤å‚æ•°å¼ºåˆ¶æ›´æ–°å®æ—¶å‚æ•°
+è¿”å›å€¼ï¼šæ— 
 ]]
 function upd(overide)
-	for k,v in pairs(libdftconfig) do
-		if k ~= "_M" and k ~= "_NAME" and k ~= "_PACKAGE" then
-			if overide or para[k] == nil then
-				para[k] = v
-			end			
-		end
-	end
+    for k,v in pairs(libdftconfig) do
+        if k ~= "_M" and k ~= "_NAME" and k ~= "_PACKAGE" then
+            if overide or para[k] == nil then
+                para[k] = v
+            end            
+        end
+    end
 end
 
 --[[
-º¯ÊıÃû£ºload
-¹¦ÄÜ  £º³õÊ¼»¯²ÎÊı
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
+å‡½æ•°åï¼šload
+åŠŸèƒ½  ï¼šåˆå§‹åŒ–å‚æ•°
+å‚æ•°  ï¼šæ— 
+è¿”å›å€¼ï¼šæ— 
 ]]
 local function load()
-	local f,fBak,fExist,fBakExist
-	f = io.open(paraname,"rb")
-	fBak = io.open(paranamebak,"rb")
+    local f,fBak,fExist,fBakExist
+    f = io.open(paraname,"rb")
+    fBak = io.open(paranamebak,"rb")
 	
-	if f then
-		fExist = f:read("*a")~=""
-		f:close()
-	end
-	if fBak then
-		fBakExist = fBak:read("*a")~=""
-		fBak:close()
-	end
+    if f then
+        fExist = f:read("*a")~=""
+        f:close()
+    end
+    if fBak then
+        fBakExist = fBak:read("*a")~=""
+        fBak:close()
+    end
 	
-	print("load fExist fBakExist",fExist,fBakExist)
+    print("load fExist fBakExist",fExist,fBakExist)
 	
-	local fResult,fBakResult
-	if fExist then
-		fResult,para = pcall(require,string.match(paraname,"/(.+)%.lua"))
-	end
+    local fResult,fBakResult
+    if fExist then
+        fResult,para = pcall(require,string.match(paraname,"/(.+)%.lua"))
+    end
 	
-	print("load fResult",fResult)
+    print("load fResult",fResult)
 	
-	if fResult then
-		os.remove(paranamebak)
-		upd()
-		return
-	end
+    if fResult then
+        os.remove(paranamebak)
+        upd()
+        return
+    end
 	
-	if fBakExist then
-		fBakResult,para = pcall(require,string.match(paranamebak,"/(.+)%.lua"))
-	end
+    if fBakExist then
+        fBakResult,para = pcall(require,string.match(paranamebak,"/(.+)%.lua"))
+    end
 	
-	print("load fBakResult",fBakResult)
+    print("load fBakResult",fBakResult)
 	
-	if fBakResult then
-		os.remove(paraname)
-		upd()
-		return
-	else
-		para = {}
-		restore()
-	end
+    if fBakResult then
+        os.remove(paraname)
+        upd()
+        return
+    else
+        para = {}
+        restore()
+    end
 end
 
 --[[
-º¯ÊıÃû£ºsave
-¹¦ÄÜ  £º±£´æ²ÎÊıÎÄ¼ş
-²ÎÊı  £º
-		s£ºÊÇ·ñÕæÕı±£´æ£¬true±£´æ£¬false»òÕßnil²»±£´æ
-·µ»ØÖµ£ºÎŞ
+å‡½æ•°åï¼šsave
+åŠŸèƒ½  ï¼šä¿å­˜å‚æ•°æ–‡ä»¶
+å‚æ•°  ï¼š
+        sï¼šæ˜¯å¦çœŸæ­£ä¿å­˜ï¼Œtrueä¿å­˜ï¼Œfalseæˆ–è€…nilä¸ä¿å­˜
+è¿”å›å€¼ï¼šæ— 
 ]]
 local function save(s)
-	if not s then return end
-	local f = {}
-	f.write = function(self, s) table.insert(self, s) end
+    if not s then return end
+    local f = {}
+    f.write = function(self, s) table.insert(self, s) end
 
-	f:write("module(...)\n")
+    f:write("module(...)\n")
 
-	for k,v in pairs(para) do
-		if k ~= "_M" and k ~= "_NAME" and k ~= "_PACKAGE" then
-			f:write(k .. " = ")
-			serialize(f,v)
-			f:write("\n")
-		end
-	end
+    for k,v in pairs(para) do
+        if k ~= "_M" and k ~= "_NAME" and k ~= "_PACKAGE" then
+            f:write(k .. " = ")
+            serialize(f,v)
+            f:write("\n")
+        end
+    end
 
-	local fparabak = io.open(paranamebak, 'wb')
-	fparabak:write(table.concat(f))
-	fparabak:close()
+
+    local fparabak = io.open(paranamebak, 'wb')
+    fparabak:write(table.concat(f))
+    fparabak:close()
 	
-	os.remove(paraname)
-	os.rename(paranamebak,paraname)
+    os.remove(paraname)	
+    os.rename(paranamebak,paraname)
 end
 
---[[
-º¯ÊıÃû£ºset
-¹¦ÄÜ  £ºÉèÖÃÄ³¸ö²ÎÊıµÄÖµ
-²ÎÊı  £º
-		k£º²ÎÊıÃû
-		v£º½«ÒªÉèÖÃµÄĞÂÖµ
-		r£ºÉèÖÃÔ­Òò£¬Ö»ÓĞ´«ÈëÁËÓĞĞ§²ÎÊı£¬²¢ÇÒvµÄĞÂÖµºÍ¾ÉÖµ·¢ÉúÁË¸Ä±ä£¬²Å»áÅ×³öPARA_CHANGED_INDÏûÏ¢
-		s£ºÊÇ·ñĞèÒªĞ´Èëµ½ÎÄ¼şÏµÍ³ÖĞ£¬false²»Ğ´Èë£¬ÆäÓàµÄ¶¼Ğ´Èë
-·µ»ØÖµ£ºtrue
-]]
+--- åˆå§‹åŒ–å‚æ•°å­˜å‚¨æ¨¡å—
+-- @string defaultCfgFile é»˜è®¤é…ç½®æ–‡ä»¶å
+-- @return nil
+-- @usage nvm.init("config.lua")
+function init(defaultCfgFile)
+    local f
+    f,libdftconfig = pcall(require,string.match(defaultCfgFile,"(.+)%.lua"))
+    configname,econfigname = "/lua/"..defaultCfgFile,"/lua/"..defaultCfgFile.."e"
+    --åˆå§‹åŒ–é…ç½®æ–‡ä»¶ï¼Œä»æ–‡ä»¶ä¸­æŠŠå‚æ•°è¯»å–åˆ°å†…å­˜ä¸­
+    load()
+end
+
+--- è®¾ç½®æŸä¸ªå‚æ•°çš„å€¼
+-- @string k å‚æ•°å
+-- @param vï¼Œå¯ä»¥æ˜¯ä»»æ„ç±»å‹ï¼Œå‚æ•°çš„æ–°å€¼
+-- @param rï¼Œè®¾ç½®åŸå› ï¼Œå¦‚æœä¼ å…¥äº†énilçš„æœ‰æ•ˆå‚æ•°ï¼Œå¹¶ä¸”vå€¼å’Œæ—§å€¼ç›¸æ¯”å‘ç”Ÿäº†æ”¹å˜ï¼Œä¼šäº§ç”Ÿä¸€ä¸ªPARA_CHANGED_INDæ¶ˆæ¯ï¼Œæºå¸¦ k,v,r 3ä¸ªå‚æ•°
+-- @param sï¼Œæ˜¯å¦ç«‹å³å†™å…¥åˆ°æ–‡ä»¶ç³»ç»Ÿä¸­ï¼Œfalseä¸å†™å…¥ï¼Œå…¶ä½™çš„éƒ½å†™å…¥
+-- @return boolæˆ–è€…nilï¼ŒæˆåŠŸè¿”å›trueï¼Œå¤±è´¥è¿”å›nil
+-- @usage nvm.set("name","Luat")ï¼Œå‚æ•°nameèµ‹å€¼ä¸ºLuatï¼Œç«‹å³å†™å…¥æ–‡ä»¶ç³»ç»Ÿ
+-- @usage nvm.set("age",12,"SVR")ï¼Œå‚æ•°ageèµ‹å€¼ä¸º12ï¼Œç«‹å³å†™å…¥æ–‡ä»¶ç³»ç»Ÿï¼Œå¦‚æœæ—§å€¼ä¸æ˜¯12ï¼Œä¼šäº§ç”Ÿä¸€ä¸ªPARA_CHANGED_INDæ¶ˆæ¯ï¼Œæºå¸¦ "age",12,"SVR" 3ä¸ªå‚æ•°
+-- @usage nvm.set("class","Class2",nil,false)ï¼Œå‚æ•°classèµ‹å€¼ä¸ºClass2ï¼Œä¸å†™å…¥æ–‡ä»¶ç³»ç»Ÿ
+-- @usage nvm.set("score",{chinese=100,math=99,english=98})ï¼Œå‚æ•°scoreèµ‹å€¼ä¸º{chinese=100,math=99,english=98}ï¼Œç«‹å³å†™å…¥æ–‡ä»¶ç³»ç»Ÿ
 function set(k,v,r,s)
-	local bchg = true
-	if type(v) ~= "table" then
-		bchg = (para[k] ~= v)
-	end
-	print("set",bchg,k,v,r,s)
-	if bchg then		
-		para[k] = v
-		save(s or s==nil)
-		if r then sys.dispatch("PARA_CHANGED_IND",k,v,r) end
-	end
-	return true
+    local bchg = true
+    if type(v) ~= "table" then
+        bchg = (para[k] ~= v)
+    end
+    log.info("nvm.set",bchg,k,v,r,s)
+    if bchg then        
+        para[k] = v
+        save(s or s==nil)
+        if r then sys.publish("PARA_CHANGED_IND",k,v,r) end
+    end
+    return true
 end
 
---[[
-º¯ÊıÃû£ºsett
-¹¦ÄÜ  £ºÉèÖÃtableÀàĞÍµÄ²ÎÊıÖĞµÄÄ³Ò»ÏîµÄÖµ
-²ÎÊı  £º
-		k£ºtable²ÎÊıÃû
-		kk£ºtable²ÎÊıÖĞµÄ¼üÖµ
-		v£º½«ÒªÉèÖÃµÄĞÂÖµ
-		r£ºÉèÖÃÔ­Òò£¬Ö»ÓĞ´«ÈëÁËÓĞĞ§²ÎÊı£¬²¢ÇÒvµÄĞÂÖµºÍ¾ÉÖµ·¢ÉúÁË¸Ä±ä£¬²Å»áÅ×³öTPARA_CHANGED_INDÏûÏ¢
-		s£ºÊÇ·ñĞèÒªĞ´Èëµ½ÎÄ¼şÏµÍ³ÖĞ£¬false²»Ğ´Èë£¬ÆäÓàµÄ¶¼Ğ´Èë
-·µ»ØÖµ£ºtrue
-]]
+--- è®¾ç½®æŸä¸ªtableç±»å‹å‚æ•°çš„æŸä¸€ä¸ªç´¢å¼•çš„å€¼
+-- @string k tableç±»å‹çš„å‚æ•°å
+-- @param kk tableç±»å‹å‚æ•°çš„æŸä¸€ä¸ªç´¢å¼•å
+-- @param vï¼Œtableç±»å‹å‚æ•°çš„æŸä¸€ä¸ªç´¢å¼•çš„æ–°å€¼
+-- @param rï¼Œè®¾ç½®åŸå› ï¼Œå¦‚æœä¼ å…¥äº†énilçš„æœ‰æ•ˆå‚æ•°ï¼Œå¹¶ä¸”vå€¼å’Œæ—§å€¼ç›¸æ¯”å‘ç”Ÿäº†æ”¹å˜ï¼Œä¼šäº§ç”Ÿä¸€ä¸ªTPARA_CHANGED_INDæ¶ˆæ¯ï¼Œæºå¸¦ k,kk,v,r 4ä¸ªå‚æ•°
+-- @param sï¼Œæ˜¯å¦ç«‹å³å†™å…¥åˆ°æ–‡ä»¶ç³»ç»Ÿä¸­ï¼Œfalseä¸å†™å…¥ï¼Œå…¶ä½™çš„éƒ½å†™å…¥
+-- @return boolæˆ–è€…nilï¼ŒæˆåŠŸè¿”å›trueï¼Œå¤±è´¥è¿”å›nil
+-- @usage nvm.sett("score","chinese",100)ï¼Œå‚æ•°score["chinese"]èµ‹å€¼ä¸º100ï¼Œç«‹å³å†™å…¥æ–‡ä»¶ç³»ç»Ÿ
+-- @usage nvm.sett("score","chinese",100,"SVR")ï¼Œå‚æ•°score["chinese"]èµ‹å€¼ä¸º100ï¼Œç«‹å³å†™å…¥æ–‡ä»¶ç³»ç»Ÿï¼Œ
+-- å¦‚æœæ—§å€¼ä¸æ˜¯100ï¼Œä¼šäº§ç”Ÿä¸€ä¸ªTPARA_CHANGED_INDæ¶ˆæ¯ï¼Œæºå¸¦ "score","chinese",100,"SVR" 4ä¸ªå‚æ•°
+-- @usage nvm.sett("score","chinese",100,nil,false)ï¼Œå‚æ•°classèµ‹å€¼ä¸ºClass2ï¼Œä¸å†™å…¥æ–‡ä»¶ç³»ç»Ÿ
 function sett(k,kk,v,r,s)
-	if para[k][kk] ~= v then
-		para[k][kk] = v
-		save(s or s==nil)
-		if r then sys.dispatch("TPARA_CHANGED_IND",k,kk,v,r) end
-	end
-	return true
+    local bchg = true
+    if type(v) ~= "table" then
+        bchg = (para[k][kk] ~= v)
+    end
+    if bchg then
+        para[k][kk] = v
+        save(s or s==nil)
+        if r then sys.publish("TPARA_CHANGED_IND",k,kk,v,r) end
+    end
+    return true
 end
 
---[[
-º¯ÊıÃû£ºflush
-¹¦ÄÜ  £º°Ñ²ÎÊı´ÓÄÚ´æĞ´µ½ÎÄ¼şÖĞ
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
+--- æ‰€æœ‰å‚æ•°ç«‹å³å†™å…¥æ–‡ä»¶ç³»ç»Ÿ
+-- @return nil
+-- @usage nvm.flush()
 function flush()
-	save(true)
+    save(true)
 end
 
---[[
-º¯ÊıÃû£ºget
-¹¦ÄÜ  £º¶ÁÈ¡²ÎÊıÖµ
-²ÎÊı  £º
-		k£º²ÎÊıÃû
-·µ»ØÖµ£º²ÎÊıÖµ
-]]
+--- è¯»å–æŸä¸ªå‚æ•°çš„å€¼
+-- @string k å‚æ•°å
+-- @return å‚æ•°å€¼
+-- @usage nameValue = nvm.get("name")
 function get(k)
-	if type(para[k]) == "table" then
-		local tmp = {}
-		for kk,v in pairs(para[k]) do
-			tmp[kk] = v
-		end
-		return tmp
-	else
-		return para[k]
-	end
+    return para[k]
 end
 
---[[
-º¯ÊıÃû£ºgett
-¹¦ÄÜ  £º¶ÁÈ¡tableÀàĞÍµÄ²ÎÊıÖĞµÄÄ³Ò»ÏîµÄÖµ
-²ÎÊı  £º
-		k£ºtable²ÎÊıÃû
-		kk£ºtable²ÎÊıÖĞµÄ¼üÖµ
-·µ»ØÖµ£º²ÎÊıÖµ
-]]
+--- è¯»å–æŸä¸ªtableç±»å‹å‚æ•°çš„æŸä¸€ä¸ªç´¢å¼•çš„å€¼
+-- @string k tableç±»å‹çš„å‚æ•°å
+-- @param kk tableç±»å‹å‚æ•°çš„æŸä¸€ä¸ªç´¢å¼•å
+-- @usage nvm.gett("score","chinese")
 function gett(k,kk)
-	return para[k][kk]
+    return para[k][kk]
 end
 
---[[
-º¯ÊıÃû£ºinit
-¹¦ÄÜ  £º³õÊ¼»¯²ÎÊı´æ´¢Ä£¿é
-²ÎÊı  £º
-		dftcfgfile£ºÄ¬ÈÏÅäÖÃÎÄ¼ş
-·µ»ØÖµ£ºÎŞ
-]]
-function init(dftcfgfile)
-	local f
-	f,libdftconfig = pcall(require,string.match(dftcfgfile,"(.+)%.lua"))
-	configname,econfigname = "/lua/"..dftcfgfile,"/lua/"..dftcfgfile.."e"
-	--³õÊ¼»¯ÅäÖÃÎÄ¼ş£¬´ÓÎÄ¼şÖĞ°Ñ²ÎÊı¶ÁÈ¡µ½ÄÚ´æÖĞ
-	load()
+--- å‚æ•°æ¢å¤å‡ºå‚è®¾ç½®
+-- @return nil
+-- @usage nvm.restore()
+function restore()
+    os.remove(paraname)
+    os.remove(paranamebak)
+    local fpara,fconfig = io.open(paraname,"wb"),io.open(configname,"rb")
+    if not fconfig then fconfig = io.open(econfigname,"rb") end
+    fpara:write(fconfig:read("*a"))
+    fpara:close()
+    fconfig:close()
+    upd(true)
+end
+
+--- è¯·æ±‚åˆ é™¤å‚æ•°æ–‡ä»¶.
+-- æ­¤æ¥å£ä¸€èˆ¬ç”¨åœ¨è¿œç¨‹å‡çº§æ—¶ï¼Œéœ€è¦ç”¨æ–°çš„config.luaè¦†ç›–åŸæ¥çš„å‚æ•°æ–‡ä»¶çš„åœºæ™¯ï¼Œåœ¨æ­¤åœºæ™¯ä¸‹ï¼Œè¿œç¨‹å‡çº§åŒ…ä¸‹è½½æˆåŠŸåï¼Œåœ¨ç¡®å®šè¦é‡å¯å‰è°ƒç”¨æ­¤æ¥å£
+-- ä¸‹æ¬¡å¼€æœºæ‰§è¡Œnvm.init("config.lua")æ—¶ï¼Œä¼šç”¨æ–°çš„config.luaæ–‡ä»¶è‡ªåŠ¨è¦†ç›–å‚æ•°æ–‡ä»¶ï¼›ä»¥åå†å¼€æœºå°±ä¸ä¼šè‡ªåŠ¨è¦†ç›–äº†
+-- ä¹Ÿå°±æ˜¯è¯´"nvm.remove()->é‡å¯->nvm.init("config.lua")"æ˜¯ä¸€ä¸ªä»…æ‰§è¡Œä¸€æ¬¡çš„å®Œæ•´æ“ä½œ
+-- @return nil
+-- @usage nvm.remove()
+function remove()
+    os.remove(paraname)
+    os.remove(paranamebak)
 end

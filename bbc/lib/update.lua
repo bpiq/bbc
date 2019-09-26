@@ -1,458 +1,124 @@
---[[
-Ä£¿éÃû³Æ£ºÔ¶³ÌÉı¼¶
-Ä£¿é¹¦ÄÜ£ºÖ»ÔÚÃ¿´Î¿ª»ú»òÕßÖØÆôÊ±£¬Á¬½ÓÉı¼¶·şÎñÆ÷£¬Èç¹û·şÎñÆ÷´æÔÚĞÂ°æ±¾£¬libºÍÓ¦ÓÃ½Å±¾Ô¶³ÌÉı¼¶
-Ä£¿é×îºóĞŞ¸ÄÊ±¼ä£º2017.02.09
-]]
+--- æ¨¡å—åŠŸèƒ½ï¼šè¿œç¨‹å‡çº§
+-- @module update
+-- @author openLuat
+-- @license MIT
+-- @copyright openLuat
+-- @release 2018.03.29
 
---¶¨ÒåÄ£¿é,µ¼ÈëÒÀÀµ¿â
-local base = _G
-local string = require"string"
-local io = require"io"
-local os = require"os"
-local rtos = require"rtos"
-local sys  = require"sys"
-local link = require"link"
-local misc = require"misc"
-local common = require"common"
-module(...)
+require "misc"
+require "http"
+require "log"
+require "common"
 
---¼ÓÔØ³£ÓÃµÄÈ«¾Öº¯ÊıÖÁ±¾µØ
-local print = base.print
-local send = link.send
-local dispatch = sys.dispatch
+module(..., package.seeall)
 
---Ô¶³ÌÉı¼¶Ä£Ê½£¬¿ÉÔÚmain.luaÖĞ£¬ÅäÖÃUPDMODE±äÁ¿£¬Î´ÅäÖÃµÄ»°Ä¬ÈÏÎª0
---0£º×Ô¶¯Éı¼¶Ä£Ê½£¬½Å±¾¸üĞÂºó£¬×Ô¶¯ÖØÆôÍê³ÉÉı¼¶
---1£ºÓÃ»§×Ô¶¨ÒåÄ£Ê½£¬Èç¹ûºóÌ¨ÓĞĞÂ°æ±¾£¬»á²úÉúÒ»¸öÏûÏ¢£¬ÓÉÓÃ»§Ó¦ÓÃ½Å±¾¾ö¶¨ÊÇ·ñÉı¼¶
-local updmode = base.UPDMODE or 0
+-- å‡çº§åŒ…ä¿å­˜è·¯å¾„
+local UPD_FILE_PATH = "/luazip/update.bin"
 
---PROTOCOL£º´«Êä²ãĞ­Òé£¬Ö»Ö§³ÖTCPºÍUDP
---SERVER,PORTÎª·şÎñÆ÷µØÖ·ºÍ¶Ë¿Ú
-local PROTOCOL,SERVER,PORT = "UDP","firmware.openluat.com",12410
---ÊÇ·ñÊ¹ÓÃÓÃ»§×Ô¶¨ÒåµÄÉı¼¶·şÎñÆ÷
-local usersvr
---Éı¼¶°ü±£´æÂ·¾¶
-local UPDATEPACK = "/luazip/update.bin"
 
--- GETÃüÁîµÈ´ıÊ±¼ä
-local CMD_GET_TIMEOUT = 10000
--- ´íÎó°ü(°üID»òÕß³¤¶È²»Æ¥Åä) ÔÚÒ»¶ÎÊ±¼äºó½øĞĞÖØĞÂ»ñÈ¡
-local ERROR_PACK_TIMEOUT = 10000
--- Ã¿´ÎGETÃüÁîÖØÊÔ´ÎÊı
-local CMD_GET_RETRY_TIMES = 5
---socket id
-local lid,updsuc
---ÉèÖÃ¶¨Ê±Éı¼¶µÄÊ±¼äÖÜÆÚ£¬µ¥Î»Ãë£¬0±íÊ¾¹Ø±Õ¶¨Ê±Éı¼¶
-local period = 0
---×´Ì¬»ú×´Ì¬
---IDLE£º¿ÕÏĞ×´Ì¬
---CHECK£º¡°²éÑ¯·şÎñÆ÷ÊÇ·ñÓĞĞÂ°æ±¾¡±×´Ì¬
---UPDATE£ºÉı¼¶ÖĞ×´Ì¬
-local state = "IDLE"
---projectidÊÇÏîÄ¿±êÊ¶µÄid,·şÎñÆ÷×Ô¼ºÎ¬»¤
---totalÊÇ°üµÄ¸öÊı£¬ÀıÈçÉı¼¶ÎÄ¼şÎª10235×Ö½Ú£¬Ôòtotal=(int)((10235+1022)/1023)=11;Éı¼¶ÎÄ¼şÎª10230×Ö½Ú£¬Ôòtotal=(int)((10230+1022)/1023)=10
---lastÊÇ×îºóÒ»¸ö°üµÄ×Ö½ÚÊı£¬ÀıÈçÉı¼¶ÎÄ¼şÎª10235×Ö½Ú£¬Ôòlast=10235%1023=5;Éı¼¶ÎÄ¼şÎª10230×Ö½Ú£¬Ôòlast=1023
-local projectid,total,last
---packid£ºµ±Ç°°üµÄË÷Òı
---getretries£º»ñÈ¡Ã¿¸ö°üÒÑ¾­ÖØÊÔµÄ´ÎÊı
-local packid,getretries = 1,0
+local sTaskId,sCbFnc,sUrl,sPeriod,SRedir,sLocation
+local sPeriodWait
+local sDownloading
 
---Ê±Çø£¬±¾Ä£¿éÖ§³ÖÉèÖÃÏµÍ³Ê±¼ä¹¦ÄÜ£¬µ«ÊÇĞèÒª·şÎñÆ÷·µ»Øµ±Ç°Ê±¼ä
-timezone = nil
-BEIJING_TIME = 8
-GREENWICH_TIME = 0
-
---[[
-º¯ÊıÃû£ºprint
-¹¦ÄÜ  £º´òÓ¡½Ó¿Ú£¬´ËÎÄ¼şÖĞµÄËùÓĞ´òÓ¡¶¼»á¼ÓÉÏupdateÇ°×º
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-local function print(...)
-	base.print("update",...)
+local function httpDownloadCbFnc(result,statusCode,head)
+    log.info("update.httpDownloadCbFnc",result,statusCode,head,sCbFnc,sPeriod)
+    sys.publish("UPDATE_DOWNLOAD",result,statusCode,head)
 end
 
---[[
-º¯ÊıÃû£ºsave
-¹¦ÄÜ  £º±£´æÊı¾İ°üµ½Éı¼¶ÎÄ¼şÖĞ
-²ÎÊı  £º
-		data£ºÊı¾İ°ü
-·µ»ØÖµ£ºÎŞ
-]]
-local function save(data)
-	--Èç¹ûÊÇµÚÒ»¸ö°ü£¬Ôò¸²¸Ç±£´æ£»·ñÔò£¬×·¼Ó±£´æ
-	local mode = packid == 1 and "wb" or "a+"
-	--´ò¿ªÎÄ¼ş
-	local f = io.open(UPDATEPACK,mode)
-
-	if f == nil then
-		print("save:file nil")
-		return
-	end
-	--Ğ´ÎÄ¼ş
-	f:write(data)
-	f:close()
+function clientTask()
+    --ä¸è¦çœç•¥æ­¤å¤„ä»£ç ï¼Œå¦åˆ™ä¸‹æ–‡ä¸­çš„misc.getImeiæœ‰å¯èƒ½è·å–ä¸åˆ°
+    while not socket.isReady() do sys.waitUntil("IP_READY_IND") end
+    while true do
+    
+        local retryCnt = 0
+        sDownloading = true
+        while true do
+            os.remove(UPD_FILE_PATH)
+            http.request("GET",
+                     sLocation or ((sUrl or "iot.openluat.com/api/site/firmware_upgrade").."?project_key=".._G.PRODUCT_KEY
+                            .."&imei="..misc.getImei().."&device_key="..misc.getSn()
+                            .."&firmware_name=".._G.PROJECT.."_"..rtos.get_version().."&version=".._G.VERSION..(sRedir and "&need_oss_url=1" or "")),
+                     nil,nil,nil,60000,httpDownloadCbFnc,UPD_FILE_PATH)
+                     
+            sPeriodWait = false
+            local _,result,statusCode,head = sys.waitUntil("UPDATE_DOWNLOAD")
+            if result then
+                if statusCode=="200" then
+                    if sCbFnc then
+                        sCbFnc(true)
+                    else
+                        sys.restart("UPDATE_DOWNLOAD_SUCCESS")
+                    end
+                elseif statusCode:sub(1,1)=="3" and head and head["Location"] then
+                    sLocation = head["Location"]
+                    print("update.timerStart",head["Location"])
+                    return sys.timerStart(request,2000)
+                else
+                    local fileSize = io.fileSize(UPD_FILE_PATH)
+                    if fileSize>0 and fileSize<=200 then
+                        local body = io.readFile(UPD_FILE_PATH)
+                        local msg = body:match("\"msg\":%s*\"(.-)\"")
+                        if msg and msg:len()<=200 then
+                            log.warn("update.error",common.ucs2beToUtf8((msg:gsub("\\u","")):fromHex()))
+                        end
+                    end                    
+                    os.remove(UPD_FILE_PATH)
+                    if sCbFnc then sCbFnc(false) end
+                end
+                break
+            else
+                os.remove(UPD_FILE_PATH)
+                retryCnt = retryCnt+1
+                if retryCnt==3 then
+                    if sCbFnc then sCbFnc(false) end
+                    break
+                end
+            end
+        end
+        sDownloading = false
+        
+        if sPeriod then
+            sPeriodWait = true
+            sys.wait(sPeriod)
+        else
+            break
+        end
+    end
 end
 
---[[
-º¯ÊıÃû£ºretry
-¹¦ÄÜ  £ºÉı¼¶¹ı³ÌÖĞµÄÖØÊÔ¶¯×÷
-²ÎÊı  £º
-		param£ºÈç¹ûÎªSTOP£¬ÔòÍ£Ö¹ÖØÊÔ£»·ñÔò£¬Ö´ĞĞÖØÊÔ
-·µ»ØÖµ£ºÎŞ
-]]
-local function retry(param)
-	print("retry",param,state,getretries)
-	--Éı¼¶×´Ì¬ÒÑ½áÊøÖ±½ÓÍË³ö
-	if state~="CONNECT" and state~="UPDATE" and state~="CHECK" then
-		return
-	end
-	--Í£Ö¹ÖØÊÔ
-	if param == "STOP" then
-		getretries = 0
-		sys.timer_stop(retry)
-		return
-	end
-	--°üÄÚÈİ´íÎó£¬ERROR_PACK_TIMEOUTºÁÃëºóÖØÊÔµ±Ç°°ü
-	if param == "ERROR_PACK" then
-		sys.timer_start(retry,ERROR_PACK_TIMEOUT)
-		return
-	end
-	--ÖØÊÔ´ÎÊı¼Ó1
-	getretries = getretries + 1
-	if getretries < CMD_GET_RETRY_TIMES then
-		-- Î´´ïÖØÊÔ´ÎÊı,¼ÌĞø³¢ÊÔ»ñÈ¡Éı¼¶°ü
-		if state == "CONNECT" then
-			link.close(lid)
-			lid = nil
-			connect()
-		elseif state == "UPDATE" then
-			reqget(packid)
-		else
-			reqcheck()
-		end
-	else
-		-- ³¬¹ıÖØÊÔ´ÎÊı,Éı¼¶Ê§°Ü
-		upend(false)
-	end
+--- å¯åŠ¨è¿œç¨‹å‡çº§åŠŸèƒ½
+-- @function[opt=nil] cbFncï¼Œæ¯æ¬¡æ‰§è¡Œè¿œç¨‹å‡çº§åŠŸèƒ½åçš„å›è°ƒå‡½æ•°ï¼Œå›è°ƒå‡½æ•°çš„è°ƒç”¨å½¢å¼ä¸ºï¼š
+-- cbFnc(result)ï¼Œresultä¸ºtrueè¡¨ç¤ºå‡çº§åŒ…ä¸‹è½½æˆåŠŸï¼Œå…¶ä½™è¡¨ç¤ºä¸‹è½½å¤±è´¥
+--å¦‚æœæ²¡æœ‰è®¾ç½®æ­¤å‚æ•°ï¼Œåˆ™å‡çº§åŒ…ä¸‹è½½æˆåŠŸåï¼Œä¼šè‡ªåŠ¨é‡å¯
+-- @string[opt=nil] urlï¼Œä½¿ç”¨httpçš„getå‘½ä»¤ä¸‹è½½å‡çº§åŒ…çš„urlï¼Œå¦‚æœæ²¡æœ‰è®¾ç½®æ­¤å‚æ•°ï¼Œé»˜è®¤ä½¿ç”¨Luat iotå¹³å°çš„url
+-- å¦‚æœç”¨æˆ·è®¾ç½®äº†urlï¼Œæ³¨æ„ï¼šä»…ä¼ å…¥å®Œæ•´urlçš„å‰åŠéƒ¨åˆ†(å¦‚æœæœ‰å‚æ•°ï¼Œå³ä¼ å…¥?å‰ä¸€éƒ¨åˆ†)ï¼Œhttp.luaä¼šè‡ªåŠ¨æ·»åŠ ?ä»¥åŠåé¢çš„å‚æ•°ï¼Œä¾‹å¦‚ï¼š
+-- è®¾ç½®çš„url="www.userserver.com/api/site/firmware_upgrade"ï¼Œåˆ™http.luaä¼šåœ¨æ­¤urlåé¢è¡¥å……ä¸‹é¢çš„å‚æ•°
+-- "?project_key=".._G.PRODUCT_KEY
+-- .."&imei="..misc.getimei()
+-- .."&device_key="..misc.getsn()
+-- .."&firmware_name=".._G.PROJECT.."_"..rtos.get_version().."&version=".._G.VERSION
+-- å¦‚æœredirè®¾ç½®ä¸ºtrueï¼Œè¿˜ä¼šè¡¥å…….."&need_oss_url=1"
+-- @number[opt=nil] periodï¼Œå•ä½æ¯«ç§’ï¼Œå®šæ—¶å¯åŠ¨è¿œç¨‹å‡çº§åŠŸèƒ½çš„é—´éš”ï¼Œå¦‚æœæ²¡æœ‰è®¾ç½®æ­¤å‚æ•°ï¼Œä»…æ‰§è¡Œä¸€æ¬¡è¿œç¨‹å‡çº§åŠŸèƒ½
+-- @bool[opt=nil] redirï¼Œæ˜¯å¦è®¿é—®é‡å®šå‘åˆ°é˜¿é‡Œäº‘çš„å‡çº§åŒ…ï¼Œä½¿ç”¨Luatæä¾›çš„å‡çº§æœåŠ¡å™¨æ—¶ï¼Œæ­¤å‚æ•°æ‰æœ‰æ„ä¹‰
+-- ä¸ºäº†ç¼“è§£Luatçš„å‡çº§æœåŠ¡å™¨å‹åŠ›ï¼Œä»2018å¹´7æœˆ11æ—¥èµ·ï¼Œåœ¨iot.openluat.comæ–°å¢æˆ–è€…ä¿®æ”¹å‡çº§åŒ…çš„å‡çº§é…ç½®æ—¶ï¼Œå‡çº§æ–‡ä»¶ä¼šå¤‡ä»½ä¸€ä»½åˆ°é˜¿é‡Œäº‘æœåŠ¡å™¨
+-- å¦‚æœæ­¤å‚æ•°è®¾ç½®ä¸ºtrueï¼Œä¼šä»é˜¿é‡Œäº‘æœåŠ¡å™¨ä¸‹è½½å‡çº§åŒ…ï¼›å¦‚æœæ­¤å‚æ•°è®¾ç½®ä¸ºfalseæˆ–è€…nilï¼Œä»ç„¶ä»Luatçš„å‡çº§æœåŠ¡å™¨ä¸‹è½½å‡çº§åŒ…
+-- @return nil
+-- @usage
+-- update.request()
+-- update.request(cbFnc)
+-- update.request(cbFnc,"www.userserver.com/update")
+-- update.request(cbFnc,nil,4*3600*1000)
+-- update.request(cbFnc,nil,4*3600*1000,true)
+function request(cbFnc,url,period,redir)
+    sCbFnc,sUrl,sPeriod,sRedir = cbFnc or sCbFnc,url or sUrl,period or sPeriod,sRedir or redir
+    print("update.request",sCbFnc,sUrl,sPeriod,sRedir)
+    if not sTaskId or coroutine.status(sTaskId)=="dead" then  
+        sTaskId = sys.taskInit(clientTask)
+    elseif period==nil and coroutine.status(sTaskId)=="suspended" and sPeriodWait then        
+        coroutine.resume(sTaskId)
+    end
 end
 
---[[
-º¯ÊıÃû£ºreqget
-¹¦ÄÜ  £º·¢ËÍ¡°»ñÈ¡µÚindex°üµÄÇëÇóÊı¾İ¡±µ½·şÎñÆ÷
-²ÎÊı  £º
-		index£º°üµÄË÷Òı£¬´Ó1¿ªÊ¼
-·µ»ØÖµ£ºÎŞ
-]]
-function reqget(index)
-	send(lid,string.format("%sGet%d,%d",
-							usersvr and "" or string.format("0,%s,%s,%s,%s,%s,",base.PRODUCT_KEY,misc.getimei(),misc.isnvalid() and misc.getsn() or "",base.PROJECT.."_"..sys.getcorever(),base.VERSION),
-							index,
-							projectid))
-	--Æô¶¯¡°CMD_GET_TIMEOUTºÁÃëºóÖØÊÔ¡±¶¨Ê±Æ÷
-	sys.timer_start(retry,CMD_GET_TIMEOUT)
+function isDownloading()
+    return sDownloading
 end
-
---[[
-º¯ÊıÃû£ºgetpack
-¹¦ÄÜ  £º½âÎö´Ó·şÎñÆ÷ÊÕµ½µÄÒ»°üÊı¾İ
-²ÎÊı  £º
-		data£º°üÄÚÈİ
-·µ»ØÖµ£ºÎŞ
-]]
-local function getpack(data)
-	--ÅĞ¶Ï°ü³¤¶ÈÊÇ·ñÕıÈ·
-	local len = string.len(data)
-	if (packid < total and len ~= 1024) or (packid >= total and (len - 2) ~= last) then
-		print("getpack:len not match",packid,len,last)
-		retry("ERROR_PACK")
-		return
-	end
-
-	--ÅĞ¶Ï°üĞòºÅÊÇ·ñÕıÈ·
-	local id = string.byte(data,1)*256+string.byte(data,2)
-	if id ~= packid then
-		print("getpack:packid not match",id,packid)
-		retry("ERROR_PACK")
-		return
-	end
-
-	--Í£Ö¹ÖØÊÔ
-	retry("STOP")
-
-	--±£´æÉı¼¶°ü
-	save(string.sub(data,3,-1))
-	--Èç¹ûÊÇÓÃ»§×Ô¶¨ÒåÄ£Ê½£¬²úÉúÒ»¸öÄÚ²¿ÏûÏ¢UP_PROGRESS_IND£¬±íÊ¾Éı¼¶½ø¶È
-	if updmode == 1 then
-		dispatch("UP_EVT","UP_PROGRESS_IND",(packid*100-((packid*100)%total))/total)
-	end
-
-	--»ñÈ¡ÏÂÒ»°üÊı¾İ
-	if packid == total then
-		upend(true)
-	else
-		packid = packid + 1
-		reqget(packid)
-	end
-end
-
---[[
-º¯ÊıÃû£ºupbegin
-¹¦ÄÜ  £º½âÎö·şÎñÆ÷ÏÂ·¢µÄĞÂ°æ±¾ĞÅÏ¢
-²ÎÊı  £º
-		data£ºĞÂ°æ±¾ĞÅÏ¢
-·µ»ØÖµ£ºÎŞ
-]]
-function upbegin(data)
-	local p1,p2,p3 = string.match(data,"LUAUPDATE,(%d+),(%d+),(%d+)")
-	--ºóÌ¨Î¬»¤µÄÏîÄ¿id£¬°üµÄ¸öÊı£¬×îºóÒ»°üµÄ×Ö½ÚÊı
-	p1,p2,p3 = base.tonumber(p1),base.tonumber(p2),base.tonumber(p3)
-	--¸ñÊ½ÕıÈ·
-	if p1 and p2 and p3 then
-		projectid,total,last = p1,p2,p3
-		--ÖØÊÔ´ÎÊıÇå0
-		getretries = 0
-		--ÉèÖÃÎªÉı¼¶ÖĞ×´Ì¬
-		state = "UPDATE"
-		--´ÓµÚ1¸öÉı¼¶°ü¿ªÊ¼
-		packid = 1
-		--·¢ËÍÇëÇó£¬»ñÈ¡µÚ1¸öÉı¼¶°ü
-		reqget(packid)
-	--¸ñÊ½´íÎó£¬Éı¼¶½áÊø
-	else
-		upend(false)
-	end
-end
-
---[[
-º¯ÊıÃû£ºupend
-¹¦ÄÜ  £ºÉı¼¶½áÊø
-²ÎÊı  £º
-		succ£º½á¹û£¬trueÎª³É¹¦£¬ÆäÓàÎªÊ§°Ü
-·µ»ØÖµ£ºÎŞ
-]]
-function upend(succ)
-	print("upend",succ)
-	if not succ then os.remove(UPDATEPACK) end
-	updsuc = succ
-	local tmpsta = state
-	state = "IDLE"
-	--Í£Ö¹ÖØÊÔ¶¨Ê±Æ÷
-	sys.timer_stop(retry)
-	--¶Ï¿ªÁ´½Ó
-	link.close(lid)
-	lid = nil
-	getretries = 0
-	sys.setrestart(true,1)
-	sys.timer_stop(sys.setrestart,true,1)
-	--Éı¼¶³É¹¦²¢ÇÒÊÇ×Ô¶¯Éı¼¶Ä£Ê½ÔòÖØÆô
-	if succ == true and updmode == 0 then
-		sys.restart("update.upend")
-	end
-	--Èç¹ûÊÇ×Ô¶¨ÒåÉı¼¶Ä£Ê½£¬²úÉúÒ»¸öÄÚ²¿ÏûÏ¢UP_END_IND£¬±íÊ¾Éı¼¶½áÊøÒÔ¼°Éı¼¶½á¹û
-	if updmode == 1 and tmpsta ~= "IDLE" then
-		dispatch("UP_EVT","UP_END_IND",succ)
-	end
-	--²úÉúÒ»¸öÄÚ²¿ÏûÏ¢UPDATE_END_IND£¬Ä¿Ç°Óë·ÉĞĞÄ£Ê½ÅäºÏÊ¹ÓÃ
-	dispatch("UPDATE_END_IND")
-	if period~=0 then sys.timer_start(connect,period*1000,"period") end
-end
-
---[[
-º¯ÊıÃû£ºreqcheck
-¹¦ÄÜ  £º·¢ËÍ¡°¼ì²é·şÎñÆ÷ÊÇ·ñÓĞĞÂ°æ±¾¡±ÇëÇóÊı¾İµ½·şÎñÆ÷
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-function reqcheck()
-	print("reqcheck",usersvr)
-	os.remove(UPDATEPACK)
-	state = "CHECK"
-	if usersvr then
-		send(lid,string.format("%s,%s,%s",misc.getimei(),base.PROJECT.."_"..sys.getcorever(),base.VERSION))
-	else
-		send(lid,string.format("0,%s,%s,%s,%s,%s",base.PRODUCT_KEY,misc.getimei(),misc.isnvalid() and misc.getsn() or "",base.PROJECT.."_"..sys.getcorever(),base.VERSION))
-	end
-	sys.timer_start(retry,CMD_GET_TIMEOUT)
-end
-
---[[
-º¯ÊıÃû£ºnofity
-¹¦ÄÜ  £ºsocket×´Ì¬µÄ´¦Àíº¯Êı
-²ÎÊı  £º
-        id£ºsocket id£¬³ÌĞò¿ÉÒÔºöÂÔ²»´¦Àí
-        evt£ºÏûÏ¢ÊÂ¼şÀàĞÍ
-		val£º ÏûÏ¢ÊÂ¼ş²ÎÊı
-·µ»ØÖµ£ºÎŞ
-]]
-local function nofity(id,evt,val)
-	--Á¬½Ó½á¹û
-	if evt == "CONNECT" then
-		state = "CONNECT"
-		--²úÉúÒ»¸öÄÚ²¿ÏûÏ¢UPDATE_BEGIN_IND£¬Ä¿Ç°Óë·ÉĞĞÄ£Ê½ÅäºÏÊ¹ÓÃ
-		dispatch("UPDATE_BEGIN_IND")
-		--Á¬½Ó³É¹¦
-		if val == "CONNECT OK" then
-			reqcheck()
-		--Á¬½ÓÊ§°Ü
-		else
-			sys.timer_start(retry,CMD_GET_TIMEOUT)
-		end
-	--Á¬½Ó±»¶¯¶Ï¿ª
-	elseif evt == "STATE" and val == "CLOSED" then		 
-		upend(false)
-	end
-end
-
---·şÎñÆ÷ÏÂ·¢µÄĞÂ°æ±¾ĞÅÏ¢£¬×Ô¶¨ÒåÄ£Ê½ÖĞÊ¹ÓÃ
-local chkrspdat
---[[
-º¯ÊıÃû£ºupselcb
-¹¦ÄÜ  £º×Ô¶¨ÒåÄ£Ê½ÏÂ£¬ÓÃ»§Ñ¡ÔñÊÇ·ñÉı¼¶µÄ»Øµ÷´¦Àí
-²ÎÊı  £º
-        sel£ºÊÇ·ñÔÊĞíÉı¼¶£¬trueÎªÔÊĞí£¬ÆäÓàÎª²»ÔÊĞí
-·µ»ØÖµ£ºÎŞ
-]]
-local upselcb = function(sel)
-	--ÔÊĞíÉı¼¶
-	if sel then
-		upbegin(chkrspdat)
-	--²»ÔÊĞíÉı¼¶
-	else
-		link.close(lid)
-		lid = nil
-		dispatch("UPDATE_END_IND")
-	end
-end
-
---[[
-º¯ÊıÃû£ºrecv
-¹¦ÄÜ  £ºsocket½ÓÊÕÊı¾İµÄ´¦Àíº¯Êı
-²ÎÊı  £º
-        id £ºsocket id£¬³ÌĞò¿ÉÒÔºöÂÔ²»´¦Àí
-        data£º½ÓÊÕµ½µÄÊı¾İ
-·µ»ØÖµ£ºÎŞ
-]]
-local function recv(id,data)
-	--Í£Ö¹ÖØÊÔ¶¨Ê±Æ÷
-	sys.timer_stop(retry)
-	--¡°²éÑ¯·şÎñÆ÷ÊÇ·ñÓĞĞÂ°æ±¾¡±×´Ì¬
-	if state == "CHECK" then
-		--·şÎñÆ÷ÉÏÓĞĞÂ°æ±¾
-		if string.find(data,"LUAUPDATE") == 1 then
-			--×Ô¶¯Éı¼¶Ä£Ê½
-			if updmode == 0 then
-				upbegin(data)
-			--×Ô¶¨ÒåÉı¼¶Ä£Ê½
-			elseif updmode == 1 then
-				chkrspdat = data
-				dispatch("UP_EVT","NEW_VER_IND",upselcb)
-			else
-				upend(false)
-			end
-		--Ã»ÓĞĞÂ°æ±¾
-		else
-			upend(false)
-		end
-		--Èç¹ûÓÃ»§Ó¦ÓÃ½Å±¾ÖĞµ÷ÓÃÁËsettimezone½Ó¿Ú
-		if timezone then
-			local clk,a,b = {}
-			a,b,clk.year,clk.month,clk.day,clk.hour,clk.min,clk.sec = string.find(data,"(%d+)%-(%d+)%-(%d+) *(%d%d):(%d%d):(%d%d)")
-			--Èç¹û·şÎñÆ÷·µ»ØÁËÕıÈ·µÄÊ±¼ä¸ñÊ½
-			if a and b then
-				--ÉèÖÃÏµÍ³Ê±¼ä
-				clk = common.transftimezone(clk.year,clk.month,clk.day,clk.hour,clk.min,clk.sec,BEIJING_TIME,timezone)
-				misc.setclock(clk)
-			end
-		end
-	--¡°Éı¼¶ÖĞ¡±×´Ì¬
-	elseif state == "UPDATE" then
-		if data == "ERR" then
-			upend(false)
-		else
-			getpack(data)
-		end
-	else
-		upend(false)
-	end	
-end
-
---[[
-º¯ÊıÃû£ºsettimezone
-¹¦ÄÜ  £ºÉèÖÃÏµÍ³Ê±¼äµÄÊ±Çø
-²ÎÊı  £º
-        zone £ºÊ±Çø£¬Ä¿Ç°½öÖ§³Ö¸ñÁÖÍşÖÎÊ±¼äºÍ±±¾©Ê±¼ä£¬BEIJING_TIMEºÍGREENWICH_TIME
-·µ»ØÖµ£ºÎŞ
-]]
-function settimezone(zone)
-	timezone = zone
-end
-
-function connect()
-	print("connect",lid,updsuc)
-	if not lid and not updsuc then
-		lid = link.open(nofity,recv,"update")
-		link.connect(lid,PROTOCOL,SERVER,PORT)
-	end
-end
-
-local function defaultbgn()
-	print("defaultbgn",usersvr)
-	if not usersvr then
-		base.assert(base.PRODUCT_KEY and base.PROJECT and base.VERSION,"undefine PRODUCT_KEY or PROJECT or VERSION in main.lua")
-		base.assert(not string.match(base.PROJECT,","),"PROJECT in main.lua format error")
-		base.assert(string.match(base.VERSION,"%d%.%d%.%d") and string.len(base.VERSION)==5,"VERSION in main.lua format error")
-		connect()
-	end
-end
-
---[[
-º¯ÊıÃû£ºsetup
-¹¦ÄÜ  £ºÅäÖÃ·şÎñÆ÷µÄ´«ÊäĞ­Òé¡¢µØÖ·ºÍ¶Ë¿Ú
-²ÎÊı  £º
-        prot £º´«Êä²ãĞ­Òé£¬½öÖ§³ÖTCPºÍUDP
-		server£º·şÎñÆ÷µØÖ·
-		port£º·şÎñÆ÷¶Ë¿Ú
-·µ»ØÖµ£ºÎŞ
-]]
-function setup(prot,server,port)
-	if prot and server and port then
-		PROTOCOL,SERVER,PORT = prot,server,port
-		usersvr = true
-		base.assert(base.PROJECT and base.VERSION,"undefine PROJECT or VERSION in main.lua")		
-		connect()
-	end
-end
-
---[[
-º¯ÊıÃû£ºsetperiod
-¹¦ÄÜ  £ºÅäÖÃ¶¨Ê±Éı¼¶µÄÖÜÆÚ
-²ÎÊı  £º
-        prd£ºnumberÀàĞÍ£¬¶¨Ê±Éı¼¶µÄÖÜÆÚ£¬µ¥Î»Ãë£»0±íÊ¾¹Ø±Õ¶¨Ê±Éı¼¶¹¦ÄÜ£¬ÆäÓàÖµÒª´óÓÚµÈÓÚ60Ãë
-·µ»ØÖµ£ºÎŞ
-]]
-function setperiod(prd)
-	base.assert(prd==0 or prd>=60,"setperiod prd error")
-	print("setperiod",prd)
-	period = prd
-	if prd==0 then
-		sys.timer_stop(connect,"period")
-	else
-		sys.timer_start(connect,prd*1000,"period")
-	end
-end
-
---[[
-º¯ÊıÃû£ºrequest
-¹¦ÄÜ  £ºÊµÊ±Æô¶¯Ò»´ÎÉı¼¶
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-function request()
-	print("request")
-	connect()
-end
-
-sys.timer_start(defaultbgn,10000)
-sys.setrestart(false,1)
-sys.timer_start(sys.setrestart,300000,true,1)

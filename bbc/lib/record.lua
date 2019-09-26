@@ -1,171 +1,157 @@
---[[
-Ä£¿éÃû³Æ£ºÂ¼Òô¿ØÖÆ
-Ä£¿é¹¦ÄÜ£ºÂ¼Òô²¢ÇÒ¶ÁÈ¡Â¼ÒôÄÚÈİ
-Ä£¿é×îºóĞŞ¸ÄÊ±¼ä£º2017.04.05
-]]
+--- æ¨¡å—åŠŸèƒ½ï¼šå½•éŸ³å¤„ç†
+-- @module record
+-- @author openLuat
+-- @license MIT
+-- @copyright openLuat
+-- @release 2017.11.23
 
---¶¨ÒåÄ£¿é,µ¼ÈëÒÀÀµ¿â
-local base = _G
-local string = require"string"
-local io = require"io"
-local os = require"os"
-local rtos = require"rtos"
-local audio = require"audio"
-local sys = require"sys"
-local ril = require"ril"
-module(...)
+require "log"
+require "ril"
+module(..., package.seeall)
 
---¼ÓÔØ³£ÓÃµÄÈ«¾Öº¯ÊıÖÁ±¾µØ
-local smatch = string.match
-local print = base.print
-local dispatch = sys.dispatch
-local tonumber = base.tonumber
-local assert = base.assert
+local ID, FILE = 1, '/RecDir/rec001'
+local recording
+local stoping
+local duration
+local recordCallback
+--local flag_s=false
+local stopCbFnc
 
---RCD_ID Â¼ÒôÎÄ¼ş±àºÅ
---RCD_FILEÂ¼ÒôÎÄ¼şÃû
-local RCD_ID,RCD_FILE = 1,"/RecDir/rec001"
---rcding£ºÊÇ·ñÕıÔÚÂ¼Òô
---rcdcb£ºÂ¼Òô»Øµ÷º¯Êı
---reading£ºÊÇ·ñÕıÔÚ¶ÁÈ¡Â¼Òô
---duration£ºÂ¼ÒôÊ±³¤£¨ºÁÃë£©
-local rcding,rcdcb,reading,duration
-
---[[
-º¯ÊıÃû£ºprint
-¹¦ÄÜ  £º´òÓ¡½Ó¿Ú£¬´ËÎÄ¼şÖĞµÄËùÓĞ´òÓ¡¶¼»á¼ÓÉÏrecordÇ°×º
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-local function print(...)
-	base.print("record",...)
+--- å¼€å§‹å½•éŸ³
+-- @param seconds å½•éŸ³æ—¶é•¿ï¼Œå•ä½ï¼šç§’
+-- @param cb å½•éŸ³ç»“æœå›è°ƒ
+-- @return result true - å¼€å§‹å½•éŸ³ å…¶ä»– - å¤±è´¥
+-- @usage result = record.start()
+function start(seconds, cb)
+    if recording or stoping or seconds <= 0 or seconds > 50 then
+        log.error('record.start', recording, stoping, seconds)
+        if cb then cb() end
+        return
+    end
+    delete()
+    duration = seconds * 1000
+    ril.request("AT+AUDREC=0,0,1," .. ID .. "," .. duration)
+    recording = true
+    recordCallback = cb
+    return true
 end
 
---[[
-º¯ÊıÃû£ºgetdata
-¹¦ÄÜ  £º»ñÈ¡Â¼ÒôÎÄ¼şÖ¸¶¨Î»ÖÃÆğµÄÖ¸¶¨³¤¶ÈÊı¾İ
-²ÎÊı  £º
-		offset£ºnumberÀàĞÍ£¬Ö¸¶¨Î»ÖÃ£¬È¡Öµ·¶Î§ÊÇ¡°0 µ½ ÎÄ¼ş³¤¶È-1¡±
-        len£ºnumberÀàĞÍ£¬Ö¸¶¨³¤¶È£¬Èç¹ûÉèÖÃµÄ³¤¶È´óÓÚÎÄ¼şÊ£ÓàµÄ³¤¶È£¬ÔòÖ»ÄÜ¶ÁÈ¡Ê£ÓàµÄ³¤¶ÈÄÚÈİ
-·µ»ØÖµ£ºÖ¸¶¨µÄÂ¼ÒôÊı¾İ£¬Èç¹û¶ÁÈ¡Ê§°Ü£¬·µ»Ø¿Õ×Ö·û´®""
-]]
-function getdata(offset,len)
-	local f,rt = io.open(RCD_FILE,"rb")
-    --Èç¹û´ò¿ªÎÄ¼şÊ§°Ü£¬·µ»ØÄÚÈİÎª¿Õ¡°¡±
-	if not f then print("getdata err£ºopen") return "" end
-	if not f:seek("set",offset) then print("getdata err£ºseek") return "" end
-    --¶ÁÈ¡Ö¸¶¨³¤¶ÈµÄÊı¾İ
-	rt = f:read(len)
-	f:close()
-	print("getdata",string.len(rt or ""))
-	return rt or ""
+--- åœæ­¢å½•éŸ³
+-- @function[opt=nil] cbFncï¼Œåœæ­¢å½•éŸ³çš„å›è°ƒå‡½æ•°(åœæ­¢ç»“æœé€šè¿‡æ­¤å‡½æ•°é€šçŸ¥ç”¨æˆ·)ï¼Œå›è°ƒå‡½æ•°çš„è°ƒç”¨å½¢å¼ä¸ºï¼š
+--      cbFnc(result)
+--      resultï¼šnumberç±»å‹
+--              0è¡¨ç¤ºåœæ­¢æˆåŠŸ
+--              1è¡¨ç¤ºä¹‹å‰å·²ç»å‘é€äº†åœæ­¢åŠ¨ä½œï¼Œè¯·è€å¿ƒç­‰å¾…åœæ­¢ç»“æœçš„å›è°ƒ
+-- @usage record.stop(cb)
+function stop(cbFnc)
+    if not recording then
+        if cbFnc then cbFnc(0) end
+        return
+    end
+    if stoping then
+        if cbFnc then cbFnc(1) end
+        return
+    end
+    stopCbFnc = cbFnc
+    ril.request("AT+AUDREC=0,0,0," .. ID .. "," .. duration)
+    stoping = true
 end
 
---[[
-º¯ÊıÃû£ºgetsize
-¹¦ÄÜ  £º»ñÈ¡µ±Ç°Â¼ÒôÎÄ¼şµÄ×Ü³¤¶È
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºµ±Ç°Â¼ÒôÎÄ¼şµÄ×Ü³¤¶È£¬µ¥Î»ÊÇ×Ö½Ú
-]]
-local function getsize()
-	local f = io.open(RCD_FILE,"rb")
-	if not f then print("getsize err£ºopen") return 0 end
-	local size = f:seek("end")
-	if not size or size == 0 then print("getsize err£ºseek") return 0 end
-	f:close()
-    return size
+--- è¯»å–å½•éŸ³æ–‡ä»¶çš„å®Œæ•´è·¯å¾„
+-- @return string å½•éŸ³æ–‡ä»¶çš„å®Œæ•´è·¯å¾„
+-- @usage filePath = record.getFilePath()
+function getFilePath()
+    return FILE
 end
 
-
---[[
-º¯ÊıÃû£ºrcdcnf
-¹¦ÄÜ  £ºAUDIO_RECORD_CNFÏûÏ¢´¦Àíº¯Êı
-²ÎÊı  £ºsuc£¬sucÎªtrue±íÊ¾¿ªÊ¼Â¼Òô·ñÔòÂ¼ÒôÊ§°Ü
-·µ»ØÖµ£ºÎŞ
-]]
-local function rcdcnf(suc)
-	print("rcdcnf",suc)
-	if suc then
-		rcding = true
-	else
-		if rcdcb then rcdcb() end
-	end
+--- è¯»å–å½•éŸ³æ•°æ®
+-- @param offset åç§»ä½ç½®
+-- @param len é•¿åº¦
+-- @return data å½•éŸ³æ•°æ®
+-- @usage data = record.getData(0, 1024)
+function getData(offset, len)
+    local f = io.open(FILE, "rb")
+    if not f then log.error('record.getData', 'open failed') return "" end
+    if not f:seek("set", offset) then log.error('record.getData', 'seek failed') f:close() return "" end
+    local data = f:read(len)
+    f:close()
+    log.info("record.getData", data and data:len() or 0)
+    return data or ""
 end
 
-
---[[
-º¯ÊıÃû£ºrcdind
-¹¦ÄÜ  £ºÂ¼Òô½áÊø´¦Àíº¯Êı
-²ÎÊı  £ºsuc£ºtrueÂ¼Òô³É¹¦£»falseÂ¼ÒôÊ§°Ü
-·µ»ØÖµ£ºtrue
-]]
-local function rcdind(suc,dur)
-	print("rcdind",suc,dur,rcding)	
-    --Â¼ÒôÊ§°Ü »òÕß ²»Ó¦¸Ã²úÉúÂ¼Òô½áÊøµÄÏûÏ¢
-	if not suc or not rcding then	
-        --É¾³ıÂ¼ÒôÎÄ¼ş
-		delete()
-	end
-	duration = dur
-	if rcdcb then rcdcb(suc and rcding,getsize()) end
-	rcding=false
+--- è¯»å–å½•éŸ³æ–‡ä»¶æ€»é•¿åº¦ï¼Œå½•éŸ³æ—¶é•¿
+-- @return fileSize å½•éŸ³æ–‡ä»¶å¤§å°
+-- @return duration å½•éŸ³æ—¶é•¿
+-- @usage fileSize, duration = record.getSize()
+function getSize()
+    local size,duration = io.fileSize(FILE),0
+    if size>6 then
+        duration = ((size-6)-((size-6)%1600))/1600
+    end
+    return size, duration
 end
 
-
---[[
-º¯ÊıÃû£ºstart
-¹¦ÄÜ  £º¿ªÊ¼Â¼Òô
-²ÎÊı  £ºseconds£ºnumberÀàĞÍ£¬Â¼ÒôÊ±³¤£¨µ¥Î»Ãë£©
-        cb£ºfunctionÀàĞÍ£¬Â¼Òô»Øµ÷º¯Êı£¬Â¼Òô½áÊøºó£¬ÎŞÂÛ³É¹¦»¹ÊÇÊ§°Ü£¬¶¼»áµ÷ÓÃcbº¯Êı
-			µ÷ÓÃ·½Ê½Îªcb(result,size)£¬resultÎªtrue±íÊ¾³É¹¦£¬false»òÕßnilÎªÊ§°Ü,size±íÊ¾Â¼ÒôÎÄ¼şµÄ´óĞ¡£¨µ¥Î»ÊÇ×Ö½Ú£©
-·µ»ØÖµ£ºÎŞ
-]]
-function start(seconds,cb)
-	print("start",seconds,cb,rcding,reading)
-	if seconds<=0 or seconds>50 then
-		print("start err£ºseconds")
-		if cb then cb() end
-		return
-	end
-    --Èç¹ûÕıÔÚÂ¼Òô»òÕßÕıÔÚ¶ÁÈ¡Â¼Òô£¬ÔòÖ±½Ó·µ»ØÊ§°Ü
-	if rcding or reading then
-		print("start err£ºing")
-		if cb then cb() end
-		return
-	end
-	
-	--ÉèÖÃÕıÔÚÂ¼Òô±êÖ¾
-	rcding = true
-	rcdcb = cb
-    --É¾³ıÒÔÇ°µÄÂ¼ÒôÎÄ¼ş
-	delete()
-    --¿ªÊ¼Â¼Òô
-	audio.beginrecord(RCD_ID,seconds*1000)
-end
-
---[[
-º¯ÊıÃû£ºdelete
-¹¦ÄÜ  £ºÉ¾³ıÂ¼ÒôÎÄ¼ş
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
+--- åˆ é™¤å½•éŸ³
+-- @usage record.delete()
 function delete()
-	os.remove(RCD_FILE)
+    os.remove(FILE)
 end
 
---[[
-º¯ÊıÃû£ºgetfilepath
-¹¦ÄÜ  £º»ñÈ¡Â¼ÒôÎÄ¼şµÄÂ·¾¶
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÂ¼ÒôÎÄ¼şµÄÂ·¾¶
-]]
-function getfilepath()
-	return RCD_ID.."&"..(duration or "0")
+--- åˆ¤æ–­æ˜¯å¦å­˜åœ¨å½•éŸ³
+-- @return result true - æœ‰å½•éŸ³ false - æ— å½•éŸ³
+-- @usage result = record.exists()
+function exists()
+    return io.exists(FILE)
 end
 
-local procer = {
-	AUDIO_RECORD_CNF = rcdcnf,
-	AUDIO_RECORD_IND = rcdind,
-}
---×¢²á±¾¹¦ÄÜÄ£¿é¹Ø×¢µÄÏûÏ¢´¦Àíº¯Êı
-sys.regapp(procer)
+--- æ˜¯å¦æ­£åœ¨å¤„ç†å½•éŸ³
+-- @return result true - æ­£åœ¨å¤„ç† false - ç©ºé—²
+-- @usage result = record.isBusy()
+function isBusy()
+    return recording or stoping
+end
+
+ril.regUrc("+AUDREC", function(data)
+    local action, size = data:match("(%d),(%d+)")
+    if action and size then
+        size = tonumber(size)
+        if action == "1" then
+            local result = size > 0 and recording
+            if not result then os.remove(FILE) size = 0 end
+            duration = size
+            if recordCallback then recordCallback(result, size) recordCallback = nil end
+            recording = false
+            stoping = false
+            if stopCbFnc then stopCbFnc(0) stopCbFnc=nil end
+        --å½•éŸ³æ’­æ”¾ç›¸å…³
+        elseif action=="2" then
+            sys.publish("LIB_RECORD_PLAY_END_IND")
+            if size > 0 then
+                sys.publish("AUDIO_PLAY_END","SUCCESS")
+            else
+                sys.publish("AUDIO_PLAY_END","ERROR")
+            end            
+        end
+    end
+end)
+ril.regRsp("+AUDREC", function(cmd, success)
+    local action = cmd:match("AUDREC=%d,%d,(%d)")
+    if action == "1" then
+        if not success then
+            if recordCallback then
+                recordCallback(false, 0)
+                recordCallback = nil
+            end
+            recording = false
+        end
+    elseif action == '0' then
+        if stoping and not success then  -- å¤±è´¥ç›´æ¥ç»“æŸï¼ŒæˆåŠŸåˆ™ç­‰åˆ°+AUDRECä¸ŠæŠ¥æ‰åˆ¤å®šåœæ­¢å½•éŸ³æˆåŠŸ
+            if stopCbFnc then stopCbFnc(0) stopCbFnc=nil end
+            stoping = false
+        end 
+    --åœæ­¢æ’­æ”¾å½•éŸ³
+    elseif action=="3" then
+        --flag_s=true
+		sys.publish("AUDIO_STOP_END")
+    end
+end)

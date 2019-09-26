@@ -1,625 +1,330 @@
---[[
-Ä£¿éÃû³Æ£ºÒôÆµ¿ØÖÆ
-Ä£¿é¹¦ÄÜ£ºdtmf±à½âÂë¡¢tts£¨ĞèÒªµ×²ãÈí¼şÖ§³Ö£©¡¢ÒôÆµÎÄ¼şµÄ²¥·ÅºÍÍ£Ö¹¡¢Â¼Òô¡¢micºÍspeakerµÄ¿ØÖÆ
-Ä£¿é×îºóĞŞ¸ÄÊ±¼ä£º2017.02.20
-]]
+--- æ¨¡å—åŠŸèƒ½ï¼šéŸ³é¢‘æ’­æ”¾.
+-- æ”¯æŒMP3ã€amræ–‡ä»¶æ’­æ”¾ï¼›
+-- æ”¯æŒæœ¬åœ°TTSæ’­æ”¾ã€é€šè¯ä¸­TTSæ’­æ”¾åˆ°å¯¹ç«¯ï¼ˆéœ€è¦ä½¿ç”¨æ”¯æŒTTSåŠŸèƒ½çš„coreè½¯ä»¶ï¼‰
+-- @module audio
+-- @author openLuat
+-- @license MIT
+-- @copyright openLuat
+-- @release 2018.3.19
 
---¶¨ÒåÄ£¿é,µ¼ÈëÒÀÀµ¿â
-local base = _G
-local string = require"string"
-local io = require"io"
-local rtos = require"rtos"
-local audio = require"audiocore"
-local sys = require"sys"
-local ril = require"ril"
-module(...)
+require "common"
+require "misc"
+require "utils"
+module(..., package.seeall)
 
---¼ÓÔØ³£ÓÃµÄÈ«¾Öº¯ÊıÖÁ±¾µØ
-local smatch = string.match
-local print = base.print
-local dispatch = sys.dispatch
 local req = ril.request
-local tonumber = base.tonumber
-local assert = base.assert
+local stopCbFnc
 
---speakervol£ºspeakerÒôÁ¿µÈ¼¶£¬È¡Öµ·¶Î§Îªaudio.VOL0µ½audio.VOL7£¬audio.VOL0Îª¾²Òô
---audiochannel£ºÒôÆµÍ¨µÀ£¬¸úÓ²¼şÉè¼ÆÓĞ¹Ø£¬ÓÃ»§³ÌĞòĞèÒª¸ù¾İÓ²¼şÅäÖÃ
---microphonevol£ºmicÒôÁ¿µÈ¼¶£¬È¡Öµ·¶Î§Îªaudio.MIC_VOL0µ½audio.MIC_VOL15£¬audio.MIC_VOL0Îª¾²Òô
-local speakervol,audiochannel,microphonevol = audio.VOL4,audio.HANDSET,audio.MIC_VOL15
-local ttscause
---ÒôÆµÎÄ¼şÂ·¾¶
-local playname
+--éŸ³é¢‘æ’­æ”¾çš„åç¨‹ID
+local taskID
 
---[[
-º¯ÊıÃû£ºprint
-¹¦ÄÜ  £º´òÓ¡½Ó¿Ú£¬´ËÎÄ¼şÖĞµÄËùÓĞ´òÓ¡¶¼»á¼ÓÉÏaudioÇ°×º
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-local function print(...)
-	base.print("audio",...)
+--sPriorityï¼šå½“å‰æ’­æ”¾çš„éŸ³é¢‘ä¼˜å…ˆçº§
+--sTypeï¼šå½“å‰æ’­æ”¾çš„éŸ³é¢‘ç±»å‹
+--sPathï¼šå½“å‰æ’­æ”¾çš„éŸ³é¢‘æ•°æ®ä¿¡æ¯
+--sVolï¼šå½“å‰æ’­æ”¾éŸ³é‡
+--sCbï¼šå½“å‰æ’­æ”¾ç»“æŸæˆ–è€…å‡ºé”™çš„å›è°ƒå‡½æ•°
+--sDupï¼šå½“å‰æ’­æ”¾çš„éŸ³é¢‘æ˜¯å¦éœ€è¦é‡å¤æ’­æ”¾
+--sDupIntervalï¼šå¦‚æœsDupä¸ºtrueï¼Œæ­¤å€¼è¡¨ç¤ºé‡å¤æ’­æ”¾çš„é—´éš”(å•ä½æ¯«ç§’)ï¼Œé»˜è®¤æ— é—´éš”
+--sStrategyï¼šä¼˜å…ˆçº§ç›¸åŒæ—¶çš„æ’­æ”¾ç­–ç•¥ï¼Œ0(è¡¨ç¤ºç»§ç»­æ’­æ”¾æ­£åœ¨æ’­æ”¾çš„éŸ³é¢‘ï¼Œå¿½ç•¥è¯·æ±‚æ’­æ”¾çš„æ–°éŸ³é¢‘)ï¼Œ1(è¡¨ç¤ºåœæ­¢æ­£åœ¨æ’­æ”¾çš„éŸ³é¢‘ï¼Œæ’­æ”¾è¯·æ±‚æ’­æ”¾çš„æ–°éŸ³é¢‘)
+local sPriority,sType,sPath,sVol,sCb,sDup,sDupInterval,sStrategy,sStopingType
+
+local function update(priority,type,path,vol,cb,dup,dupInterval)
+    print("audio.update",sPriority,priority,type,path,vol,cb,dup,dupInterval)
+    if sPriority then
+        if priority>sPriority or (priority==sPriority and sStrategy==1) then
+            print("audio.update1",priority,type,path,vol,cb,dup,dupInterval)
+            --æ­¤å¤„ç¬¬ä¸‰ä¸ªå‚æ•°ä¼ å…¥tableæ˜¯å› ä¸ºpublishæ¥å£æ— æ³•å¤„ç†nilåé¢çš„å‚æ•°
+            sys.publish("AUDIO_PLAY_END","NEW",{pri=priority,typ=type,pth=path,vl=vol,c=cb,dp=dup,dpIntval=dupInterval})
+        else
+            log.error("audio.update","priority error")
+            return false
+        end
+    else
+        sPriority,sType,sPath,sVol,sCb,sDup,sDupInterval = priority,type,path,vol,cb,dup,dupInterval
+        if vol then setVolume(vol) end
+    end
+    return true
+end
+
+local function playEnd(result)
+    log.info("audio.playEnd",result,sCb)
+    local cb = sCb
+    sPriority,sType,sPath,sVol,sCb,sDup,sDupInterval,sStopingType = nil
+    if cb then cb(result) end
+end
+
+local function isTtsApi()
+    return tonumber((rtos.get_version()):match("Luat_V(%d+)_"))>=29
+end
+
+local function taskAudio()
+    local playFnc =
+    {
+        FILE = audiocore.play,
+        TTS = function(text)
+                if isTtsApi() then
+                    audiocore.openTTS()
+                    local _,result = sys.waitUntil("TTS_OPEN_IND")
+                    if result then
+                        audiocore.playTTS(common.utf8ToUcs2(text))
+                    else
+                        audiocore.stopTTS()
+                        sys.waitUntil("TTS_STOP_IND") 
+                        audiocore.closeTTS()
+                        sys.waitUntil("TTS_CLOSE_IND")
+                        _,result = sys.waitUntil("TTS_OPEN_IND")
+                        if not result then return false end
+                    end                                      
+                else
+                    req("AT+QTTS=1") req(string.format("AT+QTTS=%d,\"%s\"",2,string.toHex(common.utf8ToUcs2(text))))
+                end
+             end,
+        TTSCC = function(text) req("AT+QTTS=1") req(string.format("AT+QTTS=%d,\"%s\"",4,string.toHex(common.utf8ToUcs2(text)))) end,
+        RECORD = function(id) f,d=record.getSize() req("AT+AUDREC=1,0,2," .. id .. "," .. d*1000)end,   
+    }
+    
+    local stopFnc =
+    {
+        FILE = audiocore.stop,
+        TTS = function(text)
+                if isTtsApi() then
+                    audiocore.stopTTS()
+                    sys.waitUntil("TTS_STOP_IND") 
+                    audiocore.closeTTS()
+                    sys.waitUntil("TTS_CLOSE_IND")
+                else
+                    req("AT+QTTS=3") sys.waitUntil("AUDIO_STOP_END")
+                end
+             end,
+        TTSCC = function() req("AT+QTTS=3") sys.waitUntil("AUDIO_STOP_END") end,
+        RECORD = function(id) f,d=record.getSize() req("AT+AUDREC=1,0,3," .. id .. "," .. d*1000) sys.waitUntil("AUDIO_STOP_END") end,        
+    }
+
+    while true do
+        log.info("audio.taskAudio begin",sPriority,sType,sPath,sVol,sCb,sDup,sDupInterval)
+        --æ£€æŸ¥å‚æ•°
+        if not playFnc[sType] then
+            playEnd(3)
+            if sType==nil then break end
+        end
+        --å¼€å§‹æ’­æ”¾
+        if playFnc[sType](sPath)==false then
+            playEnd(1)
+            if sType==nil then break end
+        end
+        --æŒ‚èµ·æ’­æ”¾ï¼Œç­‰å¾…æ’­æ”¾æˆåŠŸã€æ’­æ”¾å¤±è´¥æˆ–è€…æœ‰æ–°çš„æ’­æ”¾è¯·æ±‚æ¿€æ´»åç¨‹
+        local _,msg,param = sys.waitUntil("AUDIO_PLAY_END")
+
+        log.info("audio.taskAudio resume msg",msg)        
+        if msg=="SUCCESS" then
+            if sDup then
+                if sType=="TTS" and isTtsApi() then
+                    stopFnc[sType](sPath)
+                end
+                if sDupInterval and sDupInterval>0 then
+                    sys.waitUntil("AUDIO_PLAY_END",sDupInterval)
+                    if sType==nil then break end
+                end
+            else
+                stopFnc[sType or sStopingType](sPath)
+                playEnd(0)
+                if sType==nil then break end
+            end
+        elseif msg=="NEW" then
+            stopFnc[sType](sPath)
+            playEnd(4)
+            --if sType==nil then break end
+            update(param.pri,param.typ,param.pth,param.vl,param.c,param.dp,param.dpIntval)
+        elseif msg=="STOP" then
+            if param=="TTS" and isTtsApi() then
+                stopFnc[param]()
+            end
+            playEnd(5)
+            break
+        else
+            stopFnc[sType](sPath)
+            playEnd(1)
+            if sType==nil then break end
+        end
+    end
 end
 
 --[[
-º¯ÊıÃû£ºplaytts
-¹¦ÄÜ  £º²¥·Åtts
-²ÎÊı  £º
-		text£º×Ö·û´®
-		path£º"net"±íÊ¾ÍøÂç²¥·Å£¬ÆäÓàÖµ±íÊ¾±¾µØ²¥·Å
-·µ»ØÖµ£ºtrue
+å‡½æ•°åï¼šurc
+åŠŸèƒ½  ï¼šæœ¬åŠŸèƒ½æ¨¡å—å†…â€œæ³¨å†Œçš„åº•å±‚coreé€šè¿‡è™šæ‹Ÿä¸²å£ä¸»åŠ¨ä¸ŠæŠ¥çš„é€šçŸ¥â€çš„å¤„ç†
+å‚æ•°  ï¼š
+		dataï¼šé€šçŸ¥çš„å®Œæ•´å­—ç¬¦ä¸²ä¿¡æ¯
+		prefixï¼šé€šçŸ¥çš„å‰ç¼€
+è¿”å›å€¼ï¼šæ— 
 ]]
-local function playtts(text,path)
-	local action = path == "net" and 4 or 2
-
-	req("AT+QTTS=1")
-	req(string.format("AT+QTTS=%d,\"%s\"",action,text))
-	return true
+local function urc(data,prefix)	
+    if prefix == "+QTTS" then
+        local flag = string.match(data,": *(%d)",string.len(prefix)+1)
+        --åœæ­¢æ’­æ”¾tts
+        if flag=="0" --[[or flag == "1"]] then
+            sys.publish("AUDIO_PLAY_END","SUCCESS")
+        end	
+    end
 end
 
 --[[
-º¯ÊıÃû£ºstoptts
-¹¦ÄÜ  £ºÍ£Ö¹²¥·Åtts
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
+å‡½æ•°åï¼šrsp
+åŠŸèƒ½  ï¼šæœ¬åŠŸèƒ½æ¨¡å—å†…â€œé€šè¿‡è™šæ‹Ÿä¸²å£å‘é€åˆ°åº•å±‚coreè½¯ä»¶çš„ATå‘½ä»¤â€çš„åº”ç­”å¤„ç†
+å‚æ•°  ï¼š
+		cmdï¼šæ­¤åº”ç­”å¯¹åº”çš„ATå‘½ä»¤
+		successï¼šATå‘½ä»¤æ‰§è¡Œç»“æœï¼Œtrueæˆ–è€…false
+		responseï¼šATå‘½ä»¤çš„åº”ç­”ä¸­çš„æ‰§è¡Œç»“æœå­—ç¬¦ä¸²
+		intermediateï¼šATå‘½ä»¤çš„åº”ç­”ä¸­çš„ä¸­é—´ä¿¡æ¯
+è¿”å›å€¼ï¼šæ— 
 ]]
-local function stoptts()
-	req("AT+QTTS=3")
+local function rsp(cmd,success,response,intermediate)
+    local prefix = string.match(cmd,"AT(%+%u+%?*)")
+
+    if prefix == "+QTTS" then	
+        local action = string.match(cmd,"QTTS=(%d)")
+        if not success then            
+            if action=="1" or action=="2" then
+                sys.publish("AUDIO_PLAY_END","ERROR")
+            end
+        end
+        if action=="3" then
+            sys.publish("AUDIO_STOP_END")
+        end
+    end
 end
 
---[[
-º¯ÊıÃû£ºclosetts
-¹¦ÄÜ  £º¹Ø±Õtts¹¦ÄÜ
-²ÎÊı  £º
-		cause£º¹Ø±ÕÔ­Òò
-·µ»ØÖµ£ºÎŞ
-]]
-local function closetts(cause)
-	ttscause = cause
-	req("AT+QTTS=0")
-end
+ril.regUrc("+QTTS",urc)
+ril.regRsp("+QTTS",rsp,0)
 
---[[
-º¯ÊıÃû£ºbeginrecord
-¹¦ÄÜ  £º¿ªÊ¼Â¼Òô
-²ÎÊı  £º
-		id£ºÂ¼Òôid£¬»á¸ù¾İÕâ¸öid´æ´¢Â¼ÒôÎÄ¼ş£¬È¡Öµ·¶Î§0-4
-		duration£ºÂ¼ÒôÊ±³¤£¬µ¥Î»ºÁÃë
-·µ»ØÖµ£ºtrue
-]]
-function beginrecord(id,duration)
-	req(string.format("AT+AUDREC=0,0,1," .. id .. "," .. duration))
-	return true
-end
-
---[[
-º¯ÊıÃû£ºendrecord
-¹¦ÄÜ  £º½áÊøÂ¼Òô
-²ÎÊı  £º
-		id£ºÂ¼Òôid£¬»á¸ù¾İÕâ¸öid´æ´¢Â¼ÒôÎÄ¼ş£¬È¡Öµ·¶Î§0-4
-		duration£ºÂ¼ÒôÊ±³¤£¬µ¥Î»ºÁÃë
-·µ»ØÖµ£ºtrue
-]]
-function endrecord(id,duration)
-	req(string.format("AT+AUDREC=0,0,0," .. id .. "," .. duration))
-	return true
-end
-
---[[
-º¯ÊıÃû£ºdelrecord
-¹¦ÄÜ  £ºÉ¾³ıÂ¼ÒôÎÄ¼ş
-²ÎÊı  £º
-		id£ºÂ¼Òôid£¬»á¸ù¾İÕâ¸öid´æ´¢Â¼ÒôÎÄ¼ş£¬È¡Öµ·¶Î§0-4
-		duration£ºÂ¼ÒôÊ±³¤£¬µ¥Î»ºÁÃë
-·µ»ØÖµ£ºtrue
-]]
-function delrecord(id,duration)
-	req(string.format("AT+AUDREC=0,0,4," .. id .. "," .. duration))
-	return true
-end
-
---[[
-º¯ÊıÃû£ºplayrecord
-¹¦ÄÜ  £º²¥·ÅÂ¼ÒôÎÄ¼ş
-²ÎÊı  £º
-		dl£ºÄ£¿éÏÂĞĞ£¨¶ú»ú»òÊÖ±ú»òÀ®°È£©ÊÇ·ñ¿ÉÒÔÌıµ½Â¼Òô²¥·ÅµÄÉùÒô£¬true¿ÉÒÔÌıµ½£¬false»òÕßnilÌı²»µ½
-		loop£ºÊÇ·ñÑ­»·²¥·Å£¬trueÎªÑ­»·£¬false»òÕßnilÎª²»Ñ­»·
-		id£ºÂ¼Òôid£¬»á¸ù¾İÕâ¸öid´æ´¢Â¼ÒôÎÄ¼ş£¬È¡Öµ·¶Î§0-4
-		duration£ºÂ¼ÒôÊ±³¤£¬µ¥Î»ºÁÃë
-·µ»ØÖµ£ºtrue
-]]
-local function playrecord(dl,loop,id,duration)
-	req(string.format("AT+AUDREC=" .. (dl and 1 or 0) .. "," .. (loop and 1 or 0) .. ",2," .. id .. "," .. duration))
-	return true
-end
-
---[[
-º¯ÊıÃû£ºstoprecord
-¹¦ÄÜ  £ºÍ£Ö¹²¥·ÅÂ¼ÒôÎÄ¼ş
-²ÎÊı  £º
-		dl£ºÄ£¿éÏÂĞĞ£¨¶ú»ú»òÊÖ±ú»òÀ®°È£©ÊÇ·ñ¿ÉÒÔÌıµ½Â¼Òô²¥·ÅµÄÉùÒô£¬true¿ÉÒÔÌıµ½£¬false»òÕßnilÌı²»µ½
-		loop£ºÊÇ·ñÑ­»·²¥·Å£¬trueÎªÑ­»·£¬false»òÕßnilÎª²»Ñ­»·
-		id£ºÂ¼Òôid£¬»á¸ù¾İÕâ¸öid´æ´¢Â¼ÒôÎÄ¼ş£¬È¡Öµ·¶Î§0-4
-		duration£ºÂ¼ÒôÊ±³¤£¬µ¥Î»ºÁÃë
-·µ»ØÖµ£ºtrue
-]]
-local function stoprecord(dl,loop,id,duration)
-	req(string.format("AT+AUDREC=" .. (dl and 1 or 0) .. "," .. (loop and 1 or 0) .. ",3," .. id .. "," .. duration))
-	return true
-end
-
---[[
-º¯ÊıÃû£º_play
-¹¦ÄÜ  £º²¥·ÅÒôÆµÎÄ¼ş
-²ÎÊı  £º
-		name£ºÒôÆµÎÄ¼şÂ·¾¶
-		loop£ºÊÇ·ñÑ­»·²¥·Å£¬trueÎªÑ­»·£¬false»òÕßnilÎª²»Ñ­»·
-·µ»ØÖµ£ºµ÷ÓÃ²¥·Å½Ó¿ÚÊÇ·ñ³É¹¦£¬trueÎª³É¹¦£¬falseÎªÊ§°Ü
-]]
-local function _play(name,loop)
-	if loop then playname = name end
-	return audio.play(name)
-end
-
---[[
-º¯ÊıÃû£º_stop
-¹¦ÄÜ  £ºÍ£Ö¹²¥·ÅÒôÆµÎÄ¼ş
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºµ÷ÓÃÍ£Ö¹²¥·Å½Ó¿ÚÊÇ·ñ³É¹¦£¬trueÎª³É¹¦£¬falseÎªÊ§°Ü
-]]
-local function _stop()
-	playname = nil
-	return audio.stop()
-end
-
---[[
-º¯ÊıÃû£ºaudiourc
-¹¦ÄÜ  £º±¾¹¦ÄÜÄ£¿éÄÚ¡°×¢²áµÄµ×²ãcoreÍ¨¹ıĞéÄâ´®¿ÚÖ÷¶¯ÉÏ±¨µÄÍ¨Öª¡±µÄ´¦Àí
-²ÎÊı  £º
-		data£ºÍ¨ÖªµÄÍêÕû×Ö·û´®ĞÅÏ¢
-		prefix£ºÍ¨ÖªµÄÇ°×º
-·µ»ØÖµ£ºÎŞ
-]]
-local function audiourc(data,prefix)	
-	--Â¼Òô»òÕßÂ¼Òô²¥·Å¹¦ÄÜ
-	if prefix == "+AUDREC" then
-		local action,duration = string.match(data,"(%d),(%d+)")
-		if action and duration then
-			duration = base.tonumber(duration)
-			--¿ªÊ¼Â¼Òô
-			if action == "1" then
-				dispatch("AUDIO_RECORD_IND",(duration > 0 and true or false),duration)
-			--²¥·ÅÂ¼Òô
-			elseif action == "2" then
-				if duration > 0 then
-					playend()
-				else
-					playerr()
-				end
-			--É¾³ıÂ¼Òô
-			--[[elseif action == "4" then
-				dispatch("AUDIO_RECORD_IND",true,duration)]]
-			end
-		end
-	--tts¹¦ÄÜ
-	elseif prefix == "+QTTS" then
-		local flag = string.match(data,": *(%d)",string.len(prefix)+1)
-		--Í£Ö¹²¥·Åtts
-		if flag == "0" --[[or flag == "1"]] then
-			playend()
-		end	
-	end
-end
-
---[[
-º¯ÊıÃû£ºaudiorsp
-¹¦ÄÜ  £º±¾¹¦ÄÜÄ£¿éÄÚ¡°Í¨¹ıĞéÄâ´®¿Ú·¢ËÍµ½µ×²ãcoreÈí¼şµÄATÃüÁî¡±µÄÓ¦´ğ´¦Àí
-²ÎÊı  £º
-		cmd£º´ËÓ¦´ğ¶ÔÓ¦µÄATÃüÁî
-		success£ºATÃüÁîÖ´ĞĞ½á¹û£¬true»òÕßfalse
-		response£ºATÃüÁîµÄÓ¦´ğÖĞµÄÖ´ĞĞ½á¹û×Ö·û´®
-		intermediate£ºATÃüÁîµÄÓ¦´ğÖĞµÄÖĞ¼äĞÅÏ¢
-·µ»ØÖµ£ºÎŞ
-]]
-local function audiorsp(cmd,success,response,intermediate)
-	local prefix = smatch(cmd,"AT(%+%u+%?*)")
-
-	--Â¼Òô»òÕß²¥·ÅÂ¼ÒôÈ·ÈÏÓ¦´ğ
-	if prefix == "+AUDREC" then
-		local action = smatch(cmd,"AUDREC=%d,%d,(%d)")		
-		if action=="1" then
-			dispatch("AUDIO_RECORD_CNF",success)
-		elseif action=="3" then
-			recordstopind()
-		end
-	--²¥·Åtts»òÕß¹Ø±ÕttsÓ¦´ğ
-	elseif prefix == "+QTTS" then
-		local action = smatch(cmd,"QTTS=(%d)")
-		if not success then
-			if action == "1" or action == "2" then
-				playerr()
-			end
-		else
-			if action == "0" then
-				dispatch("TTS_CLOSE_IND",ttscause)
-			end
-		end
-		if action=="3" then
-			ttstopind()
-		end
-	end
-end
-
---×¢²áÒÔÏÂÍ¨ÖªµÄ´¦Àíº¯Êı
-ril.regurc("+AUDREC",audiourc)
-ril.regurc("+QTTS",audiourc)
---×¢²áÒÔÏÂATÃüÁîµÄÓ¦´ğ´¦Àíº¯Êı
-ril.regrsp("+AUDREC",audiorsp,0)
-ril.regrsp("+QTTS",audiorsp,0)
-
---[[
-º¯ÊıÃû£ºsetspeakervol
-¹¦ÄÜ  £ºÉèÖÃÒôÆµÍ¨µÀµÄÊä³öÒôÁ¿
-²ÎÊı  £º
-		vol£ºÒôÁ¿µÈ¼¶£¬È¡Öµ·¶Î§Îªaudiocore.VOL0µ½audiocore.VOL7£¬audiocore.VOL0Îª¾²Òô
-·µ»ØÖµ£ºÎŞ
-]]
-function setspeakervol(vol)
-	audio.setvol(vol)
-	speakervol = vol
-end
-
---[[
-º¯ÊıÃû£ºgetspeakervol
-¹¦ÄÜ  £º¶ÁÈ¡ÒôÆµÍ¨µÀµÄÊä³öÒôÁ¿
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÒôÁ¿µÈ¼¶
-]]
-function getspeakervol()
-	return speakervol
-end
-
---[[
-º¯ÊıÃû£ºsetaudiochannel
-¹¦ÄÜ  £ºÉèÖÃÒôÆµÍ¨µÀ
-²ÎÊı  £º
-		channel£ºÒôÆµÍ¨µÀ£¬¸úÓ²¼şÉè¼ÆÓĞ¹Ø£¬ÓÃ»§³ÌĞòĞèÒª¸ù¾İÓ²¼şÅäÖÃ£¬Ä¿Ç°µÄÄ£¿é½öÖ§³Öaudiocore.LOUDSPEAKER
-·µ»ØÖµ£ºÎŞ
-]]
-local function setaudiochannel(channel)
-	audio.setchannel(channel)
-	audiochannel = channel
-end
-
---[[
-º¯ÊıÃû£ºgetaudiochannel
-¹¦ÄÜ  £º¶ÁÈ¡ÒôÆµÍ¨µÀ
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÒôÆµÍ¨µÀ
-]]
-local function getaudiochannel()
-	return audiochannel
-end
-
---[[
-º¯ÊıÃû£ºsetloopback
-¹¦ÄÜ  £ºÉèÖÃ»Ø»·²âÊÔ
-²ÎÊı  £º
-		flag£ºÊÇ·ñ´ò¿ª»Ø»·²âÊÔ£¬trueÎª´ò¿ª£¬falseÎª¹Ø±Õ
-		typ£º²âÊÔ»Ø»·µÄÒôÆµÍ¨µÀ£¬¸úÓ²¼şÉè¼ÆÓĞ¹Ø£¬ÓÃ»§³ÌĞòĞèÒª¸ù¾İÓ²¼şÅäÖÃ
-		setvol£ºÊÇ·ñÉèÖÃÊä³öµÄÒôÁ¿£¬trueÎªÉèÖÃ£¬false²»ÉèÖÃ
-		vol£ºÊä³öµÄÒôÁ¿
-·µ»ØÖµ£ºtrueÉèÖÃ³É¹¦£¬falseÉèÖÃÊ§°Ü
-]]
-function setloopback(flag,typ,setvol,vol)
-	return audio.setloopback(flag,typ,setvol,vol)
-end
-
---[[
-º¯ÊıÃû£ºsetmicrophonegain
-¹¦ÄÜ  £ºÉèÖÃMICµÄÒôÁ¿
-²ÎÊı  £º
-		vol£ºmicÒôÁ¿µÈ¼¶£¬È¡Öµ·¶Î§Îªaudio.MIC_VOL0µ½audio.MIC_VOL15£¬audio.MIC_VOL0Îª¾²Òô
-·µ»ØÖµ£ºÎŞ
-]]
-function setmicrophonegain(vol)
-	audio.setmicvol(vol)
-	microphonevol = vol
-end
-
---[[
-º¯ÊıÃû£ºgetmicrophonegain
-¹¦ÄÜ  £º¶ÁÈ¡MICµÄÒôÁ¿µÈ¼¶
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÒôÁ¿µÈ¼¶
-]]
-function getmicrophonegain()
-	return microphonevol
-end
-
---[[
-º¯ÊıÃû£ºaudiomsg
-¹¦ÄÜ  £º´¦Àíµ×²ãÉÏ±¨µÄrtos.MSG_AUDIOÍâ²¿ÏûÏ¢
-²ÎÊı  £º
-		msg£ºplay_end_ind£¬ÊÇ·ñÕı³£²¥·Å½áÊø
-		     play_error_ind£¬ÊÇ·ñ²¥·Å´íÎó
-·µ»ØÖµ£ºÎŞ
-]]
-local function audiomsg(msg)
-	if msg.play_end_ind == true then
-		if playname then audio.play(playname) return end
-		playend()
-	elseif msg.play_error_ind == true then
-		if playname then playname = nil end
-		playerr()
-	end
-end
-
-local ttsState,ttsText,ttsCbFnc = "IDLE"
-function playTTS(text,vol,speed,cbFnc)
-	if vol then setspeakervol(vol) end
-	audio.openTTS(speed or 50)
-	ttsState,ttsText,ttsCbFnc = "OPENING",text,cbFnc
-end
-
-function stopTTS(cbFnc)
-	print("stopTTS",ttsState)
-	if ttsState=="PLAYING" then
-		audio.stopTTS()
-		ttsState,ttsCbFnc = "STOPING_USER",cbFnc
-	else
-		cbFnc(true)
-	end
+local function audioMsg(msg)
+    sys.publish("AUDIO_PLAY_END",msg.play_end_ind==true and "SUCCESS" or "ERROR")
 end
 
 local function ttsMsg(msg)
-	print("ttsMsg",msg.type,msg.result,ttsState)
-	
-	if msg.type==0 then
-		local state = ttsState
-		ttsState = "IDLE"
-		if ttsCbFnc and state then ttsCbFnc(state:match("ERR")==nil) end
-	elseif msg.type==1 then
-		if ttsState=="OPENING" then
-			if msg.result then
-				audio.playTTS(ttsText)
-				ttsState = "PLAYING"
-			else
-				ttsState = "IDLE"
-				if ttsCbFnc then ttsCbFnc(false) end
-			end			
-		end
-	elseif msg.type==2 then
-		if ttsState=="PLAYING" then
-			audio.stopTTS()
-			ttsState = "STOPING_"..(msg.result and "SUC" or "ERR")
-		end
-	elseif msg.type==3 then
-		audio.closeTTS()
-		ttsState = string.gsub(ttsState,"STOPING","CLOSING")
-	end
-end
-
---×¢²áµ×²ãÉÏ±¨µÄrtos.MSG_AUDIOÍâ²¿ÏûÏ¢µÄ´¦Àíº¯Êı
-sys.regmsg(rtos.MSG_AUDIO,audiomsg)
-sys.regmsg(rtos.MSG_TTS,ttsMsg)
-
---Ä¬ÈÏÒôÆµÍ¨µÀÉèÖÃÎªLOUDSPEAKER£¬ÒòÎªÄ¿Ç°µÄÄ£¿éÖ»Ö§³ÖLOUDSPEAKERÍ¨µÀ
-setaudiochannel(audio.LOUDSPEAKER)
---Ä¬ÈÏÒôÁ¿µÈ¼¶ÉèÖÃÎª4¼¶£¬4¼¶ÊÇÖĞ¼äµÈ¼¶£¬×îµÍÎª0¼¶£¬×î¸ßÎª7¼¶
-setspeakervol(audio.VOL4)
---Ä¬ÈÏMICÒôÁ¿µÈ¼¶ÉèÖÃÎª1¼¶£¬×îµÍÎª0¼¶£¬×î¸ßÎª15¼¶
-setmicrophonegain(audio.MIC_VOL1)
-
-
---spriority£ºµ±Ç°²¥·ÅµÄÒôÆµÓÅÏÈ¼¶
---styp£ºµ±Ç°²¥·ÅµÄÒôÆµÀàĞÍ
---spath£ºµ±Ç°²¥·ÅµÄÒôÆµÎÄ¼şÂ·¾¶
---svol£ºµ±Ç°²¥·ÅÒôÁ¿
---scb£ºµ±Ç°²¥·Å½áÊø»òÕß³ö´íµÄ»Øµ÷º¯Êı
---sdup£ºµ±Ç°²¥·ÅµÄÒôÆµÊÇ·ñĞèÒªÖØ¸´²¥·Å
---sduprd£ºÈç¹ûsdupÎªtrue£¬´ËÖµ±íÊ¾ÖØ¸´²¥·ÅµÄ¼ä¸ô(µ¥Î»ºÁÃë)£¬Ä¬ÈÏÎŞ¼ä¸ô
---spending£º½«Òª²¥·ÅµÄÒôÆµÊÇ·ñĞèÒªÕıÔÚ²¥·ÅµÄÒôÆµÒì²½½áÊøºó£¬ÔÙ²¥·Å
---sstrategy£ºÓÅÏÈ¼¶ÏàÍ¬Ê±µÄ²¥·Å²ßÂÔ£¬0(±íÊ¾¼ÌĞø²¥·ÅÕıÔÚ²¥·ÅµÄÒôÆµ£¬ºöÂÔÇëÇó²¥·ÅµÄĞÂÒôÆµ)£¬1(±íÊ¾Í£Ö¹ÕıÔÚ²¥·ÅµÄÒôÆµ£¬²¥·ÅÇëÇó²¥·ÅµÄĞÂÒôÆµ)
-local spriority,styp,spath,svol,scb,sdup,sduprd,sstrategy
-
---[[
-º¯ÊıÃû£ºplaybegin
-¹¦ÄÜ  £º¹Ø±ÕÉÏ´Î²¥·Åºó£¬ÔÙ²¥·Å±¾´ÎÇëÇó
-²ÎÊı  £º
-		priority£ºÒôÆµÓÅÏÈ¼¶£¬ÊıÖµÔ½Ğ¡£¬ÓÅÏÈ¼¶Ô½¸ß
-		typ£ºÒôÆµÀàĞÍ£¬Ä¿Ç°½öÖ§³Ö"FILE"¡¢"TTS"¡¢"TTSCC"¡¢"RECORD"
-		path£ºÒôÆµÎÄ¼şÂ·¾¶
-		vol£º²¥·ÅÒôÁ¿£¬È¡Öµ·¶Î§audiocore.VOL0µ½audiocore.VOL7¡£´Ë²ÎÊı¿ÉÑ¡
-		cb£ºÒôÆµ²¥·Å½áÊø»òÕß³ö´íÊ±µÄ»Øµ÷º¯Êı£¬»Øµ÷Ê±°üº¬Ò»¸ö²ÎÊı£º0±íÊ¾²¥·Å³É¹¦½áÊø£»1±íÊ¾²¥·Å³ö´í£»2±íÊ¾²¥·ÅÓÅÏÈ¼¶²»¹»£¬Ã»ÓĞ²¥·Å¡£´Ë²ÎÊı¿ÉÑ¡
-		dup£ºÊÇ·ñÑ­»·²¥·Å£¬trueÑ­»·£¬false»òÕßnil²»Ñ­»·¡£´Ë²ÎÊı¿ÉÑ¡
-		duprd£º²¥·Å¼ä¸ô(µ¥Î»ºÁÃë)£¬dupÎªtrueÊ±£¬´ËÖµ²ÅÓĞÒâÒå¡£´Ë²ÎÊı¿ÉÑ¡
-·µ»ØÖµ£ºµ÷ÓÃ³É¹¦·µ»Øtrue£¬·ñÔò·µ»Ønil
-]]
-local function playbegin(priority,typ,path,vol,cb,dup,duprd)
-	print("playbegin")
-	--ÖØĞÂ¸³Öµµ±Ç°²¥·Å²ÎÊı
-	spriority,styp,spath,svol,scb,sdup,sduprd,spending = priority,typ,path,vol,cb,dup,duprd
-
-	--Èç¹û´æÔÚÒôÁ¿²ÎÊı£¬ÉèÖÃÒôÁ¿
-	if vol then
-		setspeakervol(vol)
+    log.info("audio.ttsMsg",msg.type,msg.result)
+    local tag = {[0]="CLOSE", [1]="OPEN", [2]="PLAY", [3]="STOP"}
+    if msg.type==2 then        
+        sys.publish("AUDIO_PLAY_END",msg.result and "SUCCESS" or "ERROR")
+    else
+        if tag[msg.type] then sys.publish("TTS_"..tag[msg.type].."_IND",msg.result) end
     end
-	
-	--µ÷ÓÃ²¥·Å½Ó¿Ú³É¹¦
-	if (typ=="TTS" and playtts(path))
-		or (typ=="TTSCC" and playtts(path,"net"))
-		or (typ=="RECORD" and playrecord(true,false,tonumber(smatch(path,"(%d+)&")),tonumber(smatch(path,"&(%d+)"))))
-		or (typ=="FILE" and _play(path,dup and (not duprd or duprd==0))) then
-		return true
-	--µ÷ÓÃ²¥·Å½Ó¿ÚÊ§°Ü
-	else
-		spriority,styp,spath,svol,scb,sdup,sduprd,spending = nil
-	end
+end
+--æ³¨å†Œcoreä¸ŠæŠ¥çš„rtos.MSG_AUDIOæ¶ˆæ¯çš„å¤„ç†å‡½æ•°
+rtos.on(rtos.MSG_AUDIO,audioMsg)
+if isTtsApi() then
+    rtos.on(rtos.MSG_TTS,ttsMsg)
 end
 
---[[
-º¯ÊıÃû£ºsetstrategy
-¹¦ÄÜ  £ºÉèÖÃÓÅÏÈ¼¶ÏàÍ¬Ê±µÄ²¥·Å²ßÂÔ
-²ÎÊı  £º
-		strategy£ºÓÅÏÈ¼¶ÏàÍ¬Ê±µÄ²¥·Å²ßÂÔ
-				0£º±íÊ¾¼ÌĞø²¥·ÅÕıÔÚ²¥·ÅµÄÒôÆµ£¬ºöÂÔÇëÇó²¥·ÅµÄĞÂÒôÆµ
-				1£º±íÊ¾Í£Ö¹ÕıÔÚ²¥·ÅµÄÒôÆµ£¬²¥·ÅÇëÇó²¥·ÅµÄĞÂÒôÆµ
-·µ»ØÖµ£ºÎŞ
-]]
-function setstrategy(strategy)
-	sstrategy=strategy
+--- æ’­æ”¾éŸ³é¢‘
+-- @number priorityï¼ŒéŸ³é¢‘ä¼˜å…ˆçº§ï¼Œæ•°å€¼è¶Šå¤§ï¼Œä¼˜å…ˆçº§è¶Šé«˜
+-- @string typeï¼ŒéŸ³é¢‘ç±»å‹ï¼Œç›®å‰ä»…æ”¯æŒ"FILE"ã€"TTS"ã€"TTSCC","RECORD"
+-- @string pathï¼ŒéŸ³é¢‘æ–‡ä»¶è·¯å¾„ï¼Œè·Ÿtypæœ‰å…³
+--               typä¸º"FILE"æ—¶ï¼šè¡¨ç¤ºéŸ³é¢‘æ–‡ä»¶è·¯å¾„
+--               typä¸º"TTS"æ—¶ï¼šè¡¨ç¤ºè¦æ’­æ”¾çš„UTF8ç¼–ç æ ¼å¼çš„æ•°æ®
+--               typä¸º"TTSCC"æ—¶ï¼šè¡¨ç¤ºè¦æ’­æ”¾ç»™é€šè¯å¯¹ç«¯çš„UTF8ç¼–ç æ ¼å¼çš„æ•°æ®
+--               typä¸º"RECORD"æ—¶ï¼šè¡¨ç¤ºè¦æ’­æ”¾çš„å½•éŸ³id
+-- @number[opt=4] volï¼Œæ’­æ”¾éŸ³é‡ï¼Œå–å€¼èŒƒå›´0åˆ°7ï¼Œ0ä¸ºé™éŸ³
+-- @function[opt=nil] cbFncï¼ŒéŸ³é¢‘æ’­æ”¾ç»“æŸæ—¶çš„å›è°ƒå‡½æ•°ï¼Œå›è°ƒå‡½æ•°çš„è°ƒç”¨å½¢å¼å¦‚ä¸‹ï¼š
+-- cbFnc(result)
+-- resultè¡¨ç¤ºæ’­æ”¾ç»“æœï¼š
+--                   0-æ’­æ”¾æˆåŠŸç»“æŸï¼›
+--                   1-æ’­æ”¾å‡ºé”™
+--                   2-æ’­æ”¾ä¼˜å…ˆçº§ä¸å¤Ÿï¼Œæ²¡æœ‰æ’­æ”¾
+--                   3-ä¼ å…¥çš„å‚æ•°å‡ºé”™ï¼Œæ²¡æœ‰æ’­æ”¾
+--                   4-è¢«æ–°çš„æ’­æ”¾è¯·æ±‚ä¸­æ­¢
+--                   5-è°ƒç”¨audio.stopæ¥å£ä¸»åŠ¨åœæ­¢
+-- @bool[opt=nil] dupï¼Œæ˜¯å¦å¾ªç¯æ’­æ”¾ï¼Œtrueå¾ªç¯ï¼Œfalseæˆ–è€…nilä¸å¾ªç¯
+-- @number[opt=0] dupIntervalï¼Œå¾ªç¯æ’­æ”¾é—´éš”(å•ä½æ¯«ç§’)ï¼Œdupä¸ºtrueæ—¶ï¼Œæ­¤å€¼æ‰æœ‰æ„ä¹‰
+-- @return resultï¼Œboolæˆ–è€…nilç±»å‹ï¼ŒåŒæ­¥è°ƒç”¨æˆåŠŸè¿”å›trueï¼Œå¦åˆ™è¿”å›false
+-- @usage audio.play(0,"FILE","/ldata/call.mp3")
+-- @usage audio.play(0,"FILE","/ldata/call.mp3",7)
+-- @usage audio.play(0,"FILE","/ldata/call.mp3",7,cbFnc)
+-- @usage æ›´å¤šç”¨æ³•å‚è€ƒdemo/audio/testAudio.lua
+function play(priority,type,path,vol,cbFnc,dup,dupInterval)
+    if not update(priority,type,path,vol or 4,cbFnc,dup,dupInterval or 0) then
+        log.error("audio.play","sync error")
+        return false
+    end
+    if not sType or not taskID or coroutine.status(taskID)=="dead" then
+        taskID = sys.taskInit(taskAudio)
+    end
+    return true
 end
 
---[[
-º¯ÊıÃû£ºplay
-¹¦ÄÜ  £º²¥·ÅÒôÆµ
-²ÎÊı  £º
-		priority£ºnumberÀàĞÍ£¬±ØÑ¡²ÎÊı£¬ÒôÆµÓÅÏÈ¼¶£¬ÊıÖµÔ½´ó£¬ÓÅÏÈ¼¶Ô½¸ß
-		typ£ºstringÀàĞÍ£¬±ØÑ¡²ÎÊı£¬ÒôÆµÀàĞÍ£¬Ä¿Ç°½öÖ§³Ö"FILE"¡¢"TTS"¡¢"TTSCC"¡¢"RECORD"
-		path£º±ØÑ¡²ÎÊı£¬ÒôÆµÎÄ¼şÂ·¾¶£¬¸útypÓĞ¹Ø£º
-		      typÎª"FILE"Ê±£ºstringÀàĞÍ£¬±íÊ¾ÒôÆµÎÄ¼şÂ·¾¶
-			  typÎª"TTS"Ê±£ºstringÀàĞÍ£¬±íÊ¾Òª²¥·ÅÊı¾İµÄUCS2Ê®Áù½øÖÆ×Ö·û´®
-			  typÎª"TTSCC"Ê±£ºstringÀàĞÍ£¬±íÊ¾Òª²¥·Å¸øÍ¨»°¶Ô¶ËÊı¾İµÄUCS2Ê®Áù½øÖÆ×Ö·û´®
-			  typÎª"RECORD"Ê±£ºstringÀàĞÍ£¬±íÊ¾Â¼ÒôID&Â¼ÒôÊ±³¤£¨ºÁÃë£©
-		vol£ºnumberÀàĞÍ£¬¿ÉÑ¡²ÎÊı£¬²¥·ÅÒôÁ¿£¬È¡Öµ·¶Î§audiocore.VOL0µ½audiocore.VOL7
-		cb£ºfunctionÀàĞÍ£¬¿ÉÑ¡²ÎÊı£¬ÒôÆµ²¥·Å½áÊø»òÕß³ö´íÊ±µÄ»Øµ÷º¯Êı£¬»Øµ÷Ê±°üº¬Ò»¸ö²ÎÊı£º0±íÊ¾²¥·Å³É¹¦½áÊø£»1±íÊ¾²¥·Å³ö´í£»2±íÊ¾²¥·ÅÓÅÏÈ¼¶²»¹»£¬Ã»ÓĞ²¥·Å
-		dup£ºboolÀàĞÍ£¬¿ÉÑ¡²ÎÊı£¬ÊÇ·ñÑ­»·²¥·Å£¬trueÑ­»·£¬false»òÕßnil²»Ñ­»·
-		duprd£ºnumberÀàĞÍ£¬¿ÉÑ¡²ÎÊı£¬²¥·Å¼ä¸ô(µ¥Î»ºÁÃë)£¬dupÎªtrueÊ±£¬´ËÖµ²ÅÓĞÒâÒå
-·µ»ØÖµ£ºµ÷ÓÃ³É¹¦·µ»Øtrue£¬·ñÔò·µ»Ønil
-]]
-function play(priority,typ,path,vol,cb,dup,duprd)
-	assert(priority and typ,"play para err")
-	print("play",priority,typ,path,vol,cb,dup,duprd,styp)
-	--ÓĞÒôÆµÕıÔÚ²¥·Å
-	if styp then
-		--½«Òª²¥·ÅµÄÒôÆµÓÅÏÈ¼¶ ¸ßÓÚ ÕıÔÚ²¥·ÅµÄÒôÆµÓÅÏÈ¼¶
-		if priority > spriority or (sstrategy==1 and priority==spriority) then
-			--Èç¹ûÕıÔÚ²¥·ÅµÄÒôÆµÓĞ»Øµ÷º¯Êı£¬ÔòÖ´ĞĞ»Øµ÷£¬´«Èë²ÎÊı2
-			if scb then scb(2) end
-			--Í£Ö¹ÕıÔÚ²¥·ÅµÄÒôÆµ
-			if not stop() then
-				spriority,styp,spath,svol,scb,sdup,sduprd,spending = priority,typ,path,vol,cb,dup,duprd,true
-				return
-			end
-		--½«Òª²¥·ÅµÄÒôÆµÓÅÏÈ¼¶ µÍÓÚ ÕıÔÚ²¥·ÅµÄÒôÆµÓÅÏÈ¼¶
-		elseif priority < spriority or (sstrategy~=1 and priority==spriority) then
-			if not sdup then return	end	
-		end
-	end
-
-	playbegin(priority,typ,path,vol,cb,dup,duprd)
+--- åœæ­¢éŸ³é¢‘æ’­æ”¾
+-- @function[opt=nil] cbFncï¼Œåœæ­¢éŸ³é¢‘æ’­æ”¾çš„å›è°ƒå‡½æ•°(åœæ­¢ç»“æœé€šè¿‡æ­¤å‡½æ•°é€šçŸ¥ç”¨æˆ·)ï¼Œå›è°ƒå‡½æ•°çš„è°ƒç”¨å½¢å¼ä¸ºï¼š
+--      cbFnc(result)
+--      resultï¼šnumberç±»å‹
+--              0è¡¨ç¤ºåœæ­¢æˆåŠŸ
+--              1è¡¨ç¤ºä¹‹å‰å·²ç»å‘é€äº†åœæ­¢åŠ¨ä½œï¼Œè¯·è€å¿ƒç­‰å¾…åœæ­¢ç»“æœçš„å›è°ƒ
+-- @return nil
+-- @usage audio.stop()
+function stop(cbFnc)
+    log.info("audio.stop",sType,cbFnc)
+    if stopCbFnc and cbFnc then cbFnc(1) return end
+    if sType then
+        if sType=="FILE" then
+            audiocore.stop()
+        elseif (sType=="TTS" and not isTtsApi()) or sType=="TTSCC" then
+            req("AT+QTTS=3")
+        elseif sType=="TTS" and isTtsApi() then
+            sStopingType = "TTS"
+        elseif sType=="RECORD" then
+            f,d=record.getSize() req("AT+AUDREC=1,0,3," .. sPath .. "," .. d*1000)
+            --audiocore.stop()
+            if cbFnc then
+                stopCbFnc = cbFnc
+                function recordPlayInd()
+                    --sPriority,sType,sPath,sVol,sCb,sDup,sDupInterval = nil
+                    sys.publish("AUDIO_PLAY_END","STOP","RECORD")
+                    if stopCbFnc then stopCbFnc(0) stopCbFnc=nil end
+                    sys.unsubscribe("LIB_RECORD_PLAY_END_IND",recordPlayInd)
+                end
+                sys.subscribe("LIB_RECORD_PLAY_END_IND",recordPlayInd)
+            else
+                local typ = sType
+                sPriority,sType,sPath,sVol,sCb,sDup,sDupInterval = nil
+                sys.publish("AUDIO_PLAY_END","STOP",typ)
+            end
+        end
+        if sType~="RECORD" then
+            local typ = sType
+            sPriority,sType,sPath,sVol,sCb,sDup,sDupInterval = nil
+            sys.publish("AUDIO_PLAY_END","STOP",typ)
+            if cbFnc then cbFnc(0) end
+        end
+    else
+        if cbFnc then cbFnc(0) end 
+    end
 end
 
---[[
-º¯ÊıÃû£ºstop
-¹¦ÄÜ  £ºÍ£Ö¹ÒôÆµ²¥·Å
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÈç¹û¿ÉÒÔ³É¹¦Í¬²½Í£Ö¹£¬·µ»Øtrue£¬·ñÔò·µ»Ønil
-]]
-function stop()
-	if styp then
-		local typ,path = styp,spath		
-		spriority,styp,spath,svol,scb,sdup,sduprd,spending = nil
-		--Í£Ö¹Ñ­»·²¥·Å¶¨Ê±Æ÷
-		sys.timer_stop_all(play)
-		--Í£Ö¹ÒôÆµ²¥·Å
-		_stop()
-		if typ=="TTS" or typ=="TTSCC" then stoptts() return end
-		if typ=="RECORD" then stoprecord(true,false,tonumber(smatch(path,"(%d+)&")),tonumber(smatch(path,"&(%d+)"))) return end
-	end
-	return true
+--- è®¾ç½®å–‡å­éŸ³é‡ç­‰çº§
+-- @number volï¼ŒéŸ³é‡å€¼ä¸º0-7ï¼Œ0ä¸ºé™éŸ³
+-- @return bool resultï¼Œè®¾ç½®æˆåŠŸè¿”å›trueï¼Œå¤±è´¥è¿”å›false
+-- @usage audio.setVolume(7)
+function setVolume(vol)
+    return audiocore.setvol(vol)
+end
+--- è®¾ç½®éº¦å…‹éŸ³é‡ç­‰çº§
+-- @number volï¼ŒéŸ³é‡å€¼ä¸º0-15ï¼Œ0ä¸ºé™éŸ³
+-- @return bool resultï¼Œè®¾ç½®æˆåŠŸè¿”å›true,å¤±è´¥è¿”å›false
+-- @usage audio.setMicVolume(14)
+function setMicVolume(vol)
+    return audiocore.setmicvol(vol)
 end
 
---[[
-º¯ÊıÃû£ºplayend
-¹¦ÄÜ  £ºÒôÆµ²¥·Å³É¹¦½áÊø´¦Àíº¯Êı
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-function playend()
-	print("playend",sdup,sduprd)
-	if (styp=="TTS" or styp=="TTSCC") and not sdup then stoptts() end
-	if styp=="RECORD" and not sdup then stoprecord(true,false,tonumber(smatch(spath,"(%d+)&")),tonumber(smatch(spath,"&(%d+)"))) end
-	--ĞèÒªÖØ¸´²¥·Å
-	if sdup then
-		--´æÔÚÖØ¸´²¥·Å¼ä¸ô
-		if sduprd then
-			sys.timer_start(play,sduprd,spriority,styp,spath,svol,scb,sdup,sduprd)
-		--²»´æÔÚÖØ¸´²¥·Å¼ä¸ô
-		elseif styp=="TTS" or styp=="TTSCC" or styp=="RECORD" then
-			play(spriority,styp,spath,svol,scb,sdup,sduprd)
-		end
-	--²»ĞèÒªÖØ¸´²¥·Å
-	else
-		--Èç¹ûÕıÔÚ²¥·ÅµÄÒôÆµÓĞ»Øµ÷º¯Êı£¬ÔòÖ´ĞĞ»Øµ÷£¬´«Èë²ÎÊı0
-		if scb then scb(0) end
-		spriority,styp,spath,svol,scb,sdup,sduprd,spending = nil
-	end
+--- è®¾ç½®ä¼˜å…ˆçº§ç›¸åŒæ—¶çš„æ’­æ”¾ç­–ç•¥
+-- @number strategyï¼Œä¼˜å…ˆçº§ç›¸åŒæ—¶çš„æ’­æ”¾ç­–ç•¥ï¼›0ï¼šè¡¨ç¤ºç»§ç»­æ’­æ”¾æ­£åœ¨æ’­æ”¾çš„éŸ³é¢‘ï¼Œå¿½ç•¥è¯·æ±‚æ’­æ”¾çš„æ–°éŸ³é¢‘ï¼›1ï¼šè¡¨ç¤ºåœæ­¢æ­£åœ¨æ’­æ”¾çš„éŸ³é¢‘ï¼Œæ’­æ”¾è¯·æ±‚æ’­æ”¾çš„æ–°éŸ³é¢‘
+-- @return nil
+-- @usage audio.setStrategy(0)
+-- @usage audio.setStrategy(1)
+function setStrategy(strategy)
+    sStrategy=strategy
 end
 
---[[
-º¯ÊıÃû£ºplayerr
-¹¦ÄÜ  £ºÒôÆµ²¥·ÅÊ§°Ü´¦Àíº¯Êı
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-function playerr()
-	print("playerr")
-	if styp=="TTS" or styp=="TTSCC" then stoptts() end
-	if styp=="RECORD" then stoprecord(true,false,tonumber(smatch(spath,"(%d+)&")),tonumber(smatch(spath,"&(%d+)"))) end
-	--Èç¹ûÕıÔÚ²¥·ÅµÄÒôÆµÓĞ»Øµ÷º¯Êı£¬ÔòÖ´ĞĞ»Øµ÷£¬´«Èë²ÎÊı1
-	if scb then scb(1) end
-	spriority,styp,spath,svol,scb,sdup,sduprd,spending = nil
-end
-
-local stopreqcb
---[[
-º¯ÊıÃû£ºaudstopreq
-¹¦ÄÜ  £ºlib½Å±¾¼ä·¢ËÍÏûÏ¢AUDIO_STOP_REQµÄ´¦Àíº¯Êı
-²ÎÊı  £º
-		cb£ºÒôÆµÍ£Ö¹ºóµÄ»Øµ÷º¯Êı
-·µ»ØÖµ£ºÎŞ
-]]
-local function audstopreq(cb)
-	if stop() and cb then cb() return end
-	stopreqcb = cb
-end
-
---[[
-º¯ÊıÃû£ºttstopind
-¹¦ÄÜ  £ºµ÷ÓÃstoptts()½Ó¿Úºó£¬ttsÍ£Ö¹²¥·ÅºóµÄÏûÏ¢´¦Àíº¯Êı
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-function ttstopind()
-	print("ttstopind",spending,stopreqcb)
-	if stopreqcb then
-		stopreqcb()
-		stopreqcb = nil
-	elseif spending then
-		playbegin(spriority,styp,spath,svol,scb,sdup,sduprd)
-	end
-end
-
---[[
-º¯ÊıÃû£ºrecordstopind
-¹¦ÄÜ  £ºµ÷ÓÃstoprecord()½Ó¿Úºó£¬recordÍ£Ö¹²¥·ÅºóµÄÏûÏ¢´¦Àíº¯Êı
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-function recordstopind()
-	print("recordstopind",spending,stopreqcb)
-	if stopreqcb then
-		stopreqcb()
-		stopreqcb = nil
-	elseif spending then
-		playbegin(spriority,styp,spath,svol,scb,sdup,sduprd)
-	end
-end
-
-local procer =
-{
-	AUDIO_STOP_REQ = audstopreq,--lib½Å±¾¼äÍ¨¹ı·¢ËÍÏûÏ¢À´ÊµÏÖÒôÆµÍ£Ö¹£¬ÓÃ»§½Å±¾²»Òª·¢ËÍ´ËÏûÏ¢
-}
---×¢²áÏûÏ¢´¦Àíº¯Êı±í
-sys.regapp(procer)
+--é»˜è®¤éŸ³é¢‘é€šé“è®¾ç½®ä¸ºLOUDSPEAKERï¼Œå› ä¸ºç›®å‰çš„æ¨¡å—åªæ”¯æŒLOUDSPEAKERé€šé“
+audiocore.setchannel(audiocore.LOUDSPEAKER)
+--é»˜è®¤éŸ³é‡ç­‰çº§è®¾ç½®ä¸º4çº§ï¼Œ4çº§æ˜¯ä¸­é—´ç­‰çº§ï¼Œæœ€ä½ä¸º0çº§ï¼Œæœ€é«˜ä¸º7çº§
+setVolume(4)
+--é»˜è®¤MICéŸ³é‡ç­‰çº§è®¾ç½®ä¸º1çº§ï¼Œæœ€ä½ä¸º0çº§ï¼Œæœ€é«˜ä¸º15çº§
+setMicVolume(1)

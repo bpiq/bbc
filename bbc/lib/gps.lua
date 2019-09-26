@@ -1,1286 +1,849 @@
---[[
-ƒ£øÈ√˚≥∆£∫GPSπ‹¿Ì
-ƒ£øÈπ¶ƒ‹£∫GPS¥Úø™”Îπÿ±’°¢GPS NEMA ˝æ›Ω‚Œˆ°¢GPSæ≠Œ≥∂»∏ﬂ∂»ÀŸ∂»µ»π¶ƒ‹Ω”ø⁄
-ƒ£øÈ◊Ó∫Û–ﬁ∏ƒ ±º‰£∫2017.02.21
-]]
+--- Ê®°ÂùóÂäüËÉΩÔºöGPSÊ®°ÂùóÁÆ°ÁêÜ
+-- @module gps
+-- @author openLuat
+-- @license MIT
+-- @copyright openLuat
+-- @release 2017.10.23
+require"pm"
+require"utils"
+module(..., package.seeall)
 
---∂®“Âƒ£øÈ,µº»Î“¿¿µø‚
-local base = _G
-local table = require"table"
-local uart = require"uart"
-local rtos = require"rtos"
-local sys = require"sys"
-local pio = require"pio"
-local pm = require"pm"
-local pmd = require"pmd"
-local string = require"string"
-local common = require"common"
-local misc = require"misc"
-local os = require"os"
-local pack = require"pack"
-local bit = require"bit"
-module(...,package.seeall)
-
---º”‘ÿ≥£”√µƒ»´æ÷∫Ø ˝÷¡±æµÿ
-local print,tonumber,tostring,pairs = base.print,base.tonumber,base.tostring,base.pairs
 local smatch,sfind,slen,ssub,sbyte,sformat,srep = string.match,string.find,string.len,string.sub,string.byte,string.format,string.rep
 
---gps»´æ÷–≈œ¢±Ì
-local gps = {}
---øÿ÷∆π¶ƒ‹»´æ÷–≈œ¢±Ì
-local c = {}
---¥Æø⁄∂¡»°µΩµƒNEMA ˝æ›ª∫≥Â«¯
-local strgps = ""
+--GPSÂºÄÂêØÊ†áÂøóÔºåtrueË°®Á§∫ÂºÄÂêØÁä∂ÊÄÅÔºåfalseÊàñËÄÖnilË°®Á§∫ÂÖ≥Èó≠Áä∂ÊÄÅ
+local openFlag
+--GPSÂÆö‰ΩçÊ†áÂøóÔºå"2D"Ë°®Á§∫2DÂÆö‰ΩçÔºå"3D"Ë°®Á§∫3DÂÆö‰ΩçÔºåÂÖ∂‰ΩôË°®Á§∫Êú™ÂÆö‰Ωç
+--GPSÂÆö‰ΩçÊ†áÂøóÔºåtrueË°®Á§∫ÔºåÂÖ∂‰ΩôË°®Á§∫Êú™ÂÆö‰Ωç
+local fixFlag
+--GPSÂÆö‰ΩçÊàêÂäüÂêéÔºåËøáÊª§ÊéâÂâçfilterSecondsÁßíÁöÑÁªèÁ∫¨Â∫¶‰ø°ÊÅØ
+--ÊòØÂê¶Â∑≤ÁªèËøáÊª§ÂÆåÊàê
+local filterSeconds,filteredFlag = 0
+--‰ªéÂÆö‰ΩçÊàêÂäüÂàáÊç¢Âà∞ÂÆö‰ΩçÂ§±Ë¥•ÔºåËøûÁª≠ÂÆö‰ΩçÂ§±Ë¥•ÁöÑÊ¨°Êï∞
+local fixFailCnt = 0
+--ÁªèÁ∫¨Â∫¶Á±ªÂûãÂíåÊï∞ÊçÆ
+local latitudeType,latitude,longitudeType,longitude = "N","","E",""
+--Êµ∑ÊãîÔºåÈÄüÂ∫¶ÔºåÊñπÂêëËßí
+local altitude,speed,course = "0","0","0"
+--ÂèÇ‰∏éÂÆö‰ΩçÁöÑÂç´Êòü‰∏™Êï∞ÔºåÊâÄÊúâÂèØËßÅÂç´ÊòüÁöÑÊúÄÂ§ß‰ø°Âè∑ÂÄº,ÊâÄÊúâÂèØËßÅÂç´ÊòüÁöÑÊúÄÂ§ß‰ø°Âè∑ÂÄº‰∏≠Èó¥ÁºìÂ≠òÂÄº
+local usedSateCnt,maxSignalStrength,maxSignalStrengthVar = "0",0,0
+--ÂèØËßÅÂç´Êòü‰∏™Êï∞
+local viewedGpsSateCnt,viewedBdSateCnt = "0","0"
+--ÂèØÁî®Âç´ÊòüÂè∑ÔºåUTCÊó∂Èó¥Ôºå‰ø°Âô™ÊØî
+local SateSn,UtcTime,Gsv
+--Â§ßÂú∞È´òÔºåÂ∫¶ÂàÜÁªèÂ∫¶ÔºåÂ∫¶ÂàÜÁ∫¨Â∫¶
+local Sep,Ggalng,Ggalat
+--ÊòØÂê¶ÈúÄË¶ÅËß£ÊûêÈ°π
+local psUtcTime,psGsv,psSn
 
---œ¬√Êµƒœ˚œ¢∫Õ ¬º˛£¨ «±æπ¶ƒ‹ƒ£øÈ≤˙…˙ƒ⁄≤øœ˚œ¢ ± π”√µƒ≤Œ ˝£¨Õ‚≤ø”¶”√π¶ƒ‹ƒ£øÈø…◊¢≤·œ˚œ¢¥¶¿Ì∫Ø ˝£¨ ∂±¿˚”√œ˚œ¢∫Õ ¬º˛
---GPSƒ⁄≤øœ˚œ¢ID
-GPS_STATE_IND = "GPS_STATE_IND"
---GPSπÿ±’ ¬º˛
-GPS_CLOSE_EVT = 0
---GPS¥Úø™ ¬º˛
-GPS_OPEN_EVT = 1
---GPS∂®Œª≥…π¶ ¬º˛£®π˝¬À¡À«∞∂Œ ±º‰µƒ ˝æ›£©
-GPS_LOCATION_SUC_EVT = 2
---GPS∂®Œª ß∞‹ ¬º˛
-GPS_LOCATION_FAIL_EVT = 3
---√ª”–GPS–æ∆¨ ¬º˛
-GPS_NO_CHIP_EVT = 4
---”–GPS–æ∆¨ ¬º˛
-GPS_HAS_CHIP_EVT = 5
---GPS∂®Œª≥…π¶ ¬º˛£®ªπ√ª”–π˝¬À«∞∂Œ ±º‰µƒ ˝æ›£©
-GPS_LOCATION_UNFILTER_SUC_EVT = 6
---GOKE GPS«–ªªBINARYƒ£ Ω”¶¥ ¬º˛
-GPS_BINARY_ACK_EVT = 7
---GOKE GPS–¥GPD”¶¥ ¬º˛
-GPS_BINW_ACK_EVT = 8
---GOKE GPS–¥GPDΩ· ¯”¶¥ ¬º˛
-GPS_BINW_END_ACK_EVT = 9
---GPS 3D∂®Œª≥…π¶ ¬º˛
-GPS_LOCATION_SUC_3D_EVT = 10
-
-
---æ≠Œ≥∂»Œ™∂»µƒ∏Ò Ω
-GPS_DEGREES = 0
---æ≠Œ≥∂»Œ™∂»∑÷µƒ∏Ò Ω
-GPS_DEGREES_MINUTES = 1
-
---∏Ò¡÷Õ˛÷Œ ±º‰
-GPS_GREENWICH_TIME = 0
---±±æ© ±º‰
-GPS_BEIJING_TIME = 1
---‘Ωƒœ ±º‰
-GPS_VIETNAM_TIME = 2
-
---ÀŸ∂»µ•ŒªŒ™∫£¿Ô√ø–° ±
-GPS_KNOT_SPD = 0
---ÀŸ∂»µ•ŒªŒ™π´¿Ô√ø–° ±
-GPS_KILOMETER_SPD = 1
-
---nogpschipcnt£∫gpsø™∆Ù∫Û£¨»Áπ˚∂¡»°nogpschipcnt¥Œ¥Æø⁄£¨∂º√ª”– ’µΩ ˝æ›£¨‘Ú»œŒ™√ª”–GPS–æ∆¨
---hdop,paccflg,paccqry,pacc£∫≈–∂œgps∂®Œªæ´∂»µƒ4∏ˆ≤Œ ˝
-local nogpschipcnt = 5
-
---[[
-∫Ø ˝√˚£∫abs
-π¶ƒ‹  £∫«Û¡Ω∏ˆ ˝÷Æ≤Óµƒæ¯∂‘÷µ
-≤Œ ˝  £∫
-		v1£∫µ⁄“ª∏ˆ ˝
-		v2£∫µ⁄∂˛∏ˆ ˝
-∑µªÿ÷µ£∫≤Óµƒæ¯∂‘÷µ
-]]
-local function abs(v1,v2)
-	return ((v1>v2) and (v1-v2) or (v2-v1))
-end
-
-local function getmilli(v,vr)
-	local L,ov1,v1,v2,R,T,OT = slen(v)
-	if (L ~= 4 and L ~= 5) or slen(vr) ~= 5 then
-		print("gps data not right", v, vr)
-		return
-	end
-	v2 = ssub(v,1,L-2)
-	v1 = tostring((tonumber(ssub(v,L-1,L) .. vr)*10-(tonumber(ssub(v,L-1,L) .. vr)*10%6))/6)
-	ov1 = ssub(v,L-1,L) .. vr
-	L = slen(v1)
-	if L > 7 then
-		v1 = ssub(v1,1,7)
-	elseif L < 7 then
-		v1 = srep("0", 7-L) .. v1
-	end
-	L = slen(ov1)
-	if L > 7 then
-		ov1 = ssub(ov1,1,7)
-	elseif L < 7 then
-		ov1 = ov1 .. string.rep("0", 7-L)
-	end
-
-	T = v2 .. "." .. v1
-	OT = v2 .. "." .. ov1
-	R = tonumber(v2..ssub(v1,1,5)) * 36 + (tonumber(ssub(v1,6,7))*36-(tonumber(ssub(v1,6,7))*36%100))/100
-	return OT,T,R
-end
+--GPS‰æõÁîµËÆæÁΩÆÂáΩÊï∞
+local powerCbFnc
+--‰∏≤Âè£ÈÖçÁΩÆ
+uartBaudrate = 115200
+local uartID,uartDatabits,uartParity,uartStopbits = 2,8,uart.PAR_NONE,uart.STOP_1
+--ÊêúÊòüÊ®°ÂºèÂëΩ‰ª§Â≠óÁ¨¶‰∏≤Ôºå"$PGKC115," .. gps .. "," .. glonass .. "," .. beidou .. "," .. galieo .. "*"
+local aerialModeStr,aerialModeSetted = ""
+--ËøêË°åÊ®°ÂºèÂëΩ‰ª§Â≠óÁ¨¶‰∏≤Ôºå"$PGKC105," .. mode .. "," .. rt .. "," .. st .. "*"
+local runModeStr,runModeSetted = ""
+--Ê≠£Â∏∏ËøêË°åÊ®°Âºè‰∏ãNMEAÊï∞ÊçÆ‰∏äÊä•Èó¥ÈöîÂëΩ‰ª§Â≠óÁ¨¶‰∏≤Ôºå"$PGKC101," .. interval .. "*"
+local nmeaReportStr,nmeaReportSetted = ""
+--ÊØèÁßçNEMAÊï∞ÊçÆÁöÑËæìÂá∫È¢ëÁéáÂëΩ‰ª§Â≠óÁ¨¶‰∏≤
+local nmeaReportFreqStr,nmeaReportFreqSetted = ""
+--NMEAÊï∞ÊçÆÂ§ÑÁêÜÊ®°ÂºèÔºå0Ë°®Á§∫‰ªÖgps.luaÂÜÖÈÉ®Â§ÑÁêÜÔºå1Ë°®Á§∫‰ªÖÁî®Êà∑Ëá™Â∑±Â§ÑÁêÜÔºå2Ë°®Á§∫gps.luaÂíåÁî®Êà∑ÂêåÊó∂Â§ÑÁêÜ
+--Áî®Êà∑Â§ÑÁêÜ‰∏ÄÊù°NMEAÊï∞ÊçÆÁöÑÂõûË∞ÉÂáΩÊï∞
+local nmeaMode,nmeaCbFnc = 0
+--NMEAÊï∞ÊçÆËæìÂá∫Èó¥Èöî
+local nmeaInterval = 1000
+--ËøêË°åÊ®°Âºè
+--0ÔºåÊ≠£Â∏∏ËøêË°åÊ®°Âºè
+--1ÔºåÂë®ÊúüË∂Ö‰ΩéÂäüËÄóË∑üË∏™Ê®°Âºè
+--2ÔºåÂë®Êúü‰ΩéÂäüËÄóÊ®°Âºè
+--4ÔºåÁõ¥Êé•ËøõÂÖ•Ë∂Ö‰ΩéÂäüËÄóË∑üË∏™Ê®°Âºè
+--8ÔºåËá™Âä®‰ΩéÂäüËÄóÊ®°ÂºèÔºåÂèØ‰ª•ÈÄöËøá‰∏≤Âè£Âî§ÈÜí
+--9, Ëá™Âä®Ë∂Ö‰ΩéÂäüËÄóË∑üË∏™Ê®°ÂºèÔºåÈúÄË¶Åforce onÊù•Âî§ÈÜí
+local runMode = 0
+--runMode‰∏∫1ÊàñËÄÖ2Êó∂ÔºåGPSËøêË°åÁä∂ÊÄÅÂíå‰ºëÁú†Áä∂ÊÄÅÁöÑÊó∂Èïø
+local runTime,sleepTime
 
 --[[
-∫Ø ˝√˚£∫getstrength
-π¶ƒ‹  £∫Ω‚ŒˆGSV ˝æ›
-≤Œ ˝  £∫
-		sg£∫NEMA÷–µƒ“ª––GSV ˝æ›
-∑µªÿ÷µ£∫Œﬁ
+ÂáΩÊï∞ÂêçÔºögetstrength
+ÂäüËÉΩ  ÔºöËß£ÊûêGSVÊï∞ÊçÆ
+ÂèÇÊï∞  Ôºö
+		sgÔºöNEMA‰∏≠ÁöÑ‰∏ÄË°åGSVÊï∞ÊçÆ
+ËøîÂõûÂÄºÔºöÊó†
 ]]
 local function getstrength(sg)
-	local d1,d2,curnum,lineno,total,sgv_str = sfind(sg,"GPGSV,(%d),(%d),(%d+),(.*)%*.*")
-	if not curnum or not lineno or not total or not sgv_str then
-		return
-	end
-	if tonumber(lineno)== 1  then
-		gps.sates = ""
-		gps.sn,gps.sn1 = 0,0
-		--gps.gsv = ""
-	end
+    sg = ssub(sg, 4, #sg)
+    local d1,d2,curnum,lineno,total,sgv_str = sfind(sg,"GSV,(%d),(%d),(%d+),(.*)%*.*")
 
-	local tmpstr,i = sgv_str
-	for i=1,4 do
-		local d1,d2,id,elevation,azimuth,strength = sfind(tmpstr,"(%d+),([%-]*%d*),(%d*),(%d*)")
-		if id == nil then
-			return
-		end
-		if strength == "" or not strength then
-			strength = "00"
-		end
-		strength = tonumber(strength)
-		if strength and strength < 60 then
-			gps.sates = gps.sates .. id .. string.format("%02d",strength) .. " "
-			if strength > gps.sn then
-				gps.sn = strength
-			end
-			if tonumber(id)==1 and strength > gps.sn1 then
-				gps.sn1 = strength
-			end   
-		end
-		local idx,cur,fnd,tmpid = 0,id..","..elevation..","..azimuth..","..strength..",",false
-		for tmpid in string.gmatch(gps.gsv,"(%d+),%d*,%d*,%d*,") do
-			idx = idx + 1
-			if tmpid == id then fnd = true break end
-		end
-		if fnd then
-			local pattern,i = ""
-			for i=1,idx do
-				pattern = pattern.."%d+,%d*,%d*,%d*,"
-			end
-			local m1,m2 = sfind(gps.gsv,"^"..pattern)
-			if m1 and m2 then
-				local front = ssub(gps.gsv,1,m2)
-				local n1,n2 = sfind(front,"%d+,%d*,%d*,%d*,$")
-				if n1 and n2 then
-					gps.gsv = ssub(gps.gsv,1,n1-1)..cur..ssub(gps.gsv,n2+1,-1)
-				end
-			end
-		else
-			gps.gsv = gps.gsv..cur
-		end
-		
-		tmpstr = ssub(tmpstr,d2+1,-1)
-	end
+    if not curnum or not lineno or not total or not sgv_str then
+        return
+    end
+    if lineno == nil then
+        maxSignalStrengthVar = 0
+        maxSignalStrength = 0
+    elseif tonumber(lineno) == 1 then
+        maxSignalStrength = maxSignalStrengthVar
+        maxSignalStrengthVar = 0
+    end
+
+    local tmpstr,i = sgv_str
+    for i=1,4 do
+        local d1,d2,id,elevation,azimuth,strength = sfind(tmpstr,"(%d+),([%-]*%d*),(%d*),(%d*)")
+        if id == nil then return end
+        if strength == "" or not strength then
+            strength = "00"
+        end
+        strength = tonumber(strength)
+        if strength > maxSignalStrengthVar then
+            maxSignalStrengthVar = strength
+        end
+
+        local idx,cur,fnd,tmpid = 0,id..","..elevation..","..azimuth..","..strength..",",false
+        for tmpid in string.gmatch(Gsv,"(%d+),%d*,%d*,%d*,") do
+            idx = idx + 1
+            if tmpid == id then fnd = true break end
+        end
+        if fnd then
+            local pattern,i = ""
+            for i=1,idx do
+                pattern = pattern.."%d+,%d*,%d*,%d*,"
+            end
+            local m1,m2 = sfind(Gsv,"^"..pattern)
+            if m1 and m2 then
+                local front = ssub(Gsv,1,m2)
+                local n1,n2 = sfind(front,"%d+,%d*,%d*,%d*,$")
+                if n1 and n2 then
+                    Gsv = ssub(Gsv,1,n1-1)..cur..ssub(Gsv,n2+1,-1)
+                end
+            end
+        else
+            Gsv = Gsv..cur
+        end
+
+        tmpstr = ssub(tmpstr,d2+1,-1)
+    end
 end
 
-local function getvg(A,L)
-	local A1,A2,L1,L2,t1
-	t1 = slen(L)
-	A1 = ssub(A,1,4)
-	A2 = ssub(A,5,8).."0"
-	L1 = ssub(L,1,t1-4)
-	L2 = ssub(L,t1-3,t1).."0"
-	return A1,A2,L1,L2
+local function filterTimerFnc()
+    log.info("gps.filterTimerFnc end")
+    filteredFlag = true
 end
 
-local function push(A,L)	
-	return getvg(A,L)
+local function parseNmea(s)
+    if not s or s=="" then return end
+    local lat,lng,spd,cog,gpsFind,gpsTime,gpsDate,locSateCnt,hdp,latTyp,lngTyp,altd
+
+    local hexStr = s:toHex()
+    if "AAF00C0001009500039B0D0A"==hexStr then
+        sys.publish("GPS_STATE","BINARY_CMD_ACK")
+        return
+    elseif smatch(hexStr,"^AAF00C000300") then
+        sys.publish("GPS_STATE",smatch(hexStr,"^AAF00C000300FFFF") and "WRITE_EPH_END_ACK" or "WRITE_EPH_ACK")
+        return
+    end
+
+    local fixed
+
+    if smatch(s,"GGA") then
+        lat,latTyp,lng,lngTyp,gpsFind,locSateCnt,hdp,altd,sep = smatch(s,"GGA,%d+%.%d+,(%d+%.%d+),([NS]),(%d+%.%d+),([EW]),(%d),(%d+),([%d%.]*),(.*),M,(.*),M")
+        if (gpsFind=="1" or gpsFind=="2" or gpsFind=="4") and altd then
+            fixed = true
+            altitude = altd
+            latitudeType,longitudeType,latitude,longitude = latTyp,lngTyp,lat,lng
+            usedSateCnt = locSateCnt
+            Ggalng,Ggalat = (lngTyp=="W" and "-" or "")..lng,(latTyp=="S" and "-" or "")..lat
+            Sep = sep
+        else
+            fixed = false
+        end
+    elseif smatch(s,"RMC") then
+        gpsTime,gpsFind,lat,latTyp,lng,lngTyp,spd,cog,gpsDate = smatch(s,"RMC,(%d%d%d%d%d%d)%.%d+,(%w),(%d*%.*%d*),([NS]*),(%d*%.*%d*),([EW]*),(.-),(.-),(%d%d%d%d%d%d),")
+        if gpsFind=="A" and cog then
+            fixed = true
+            latitudeType,longitudeType,latitude,longitude = latTyp,lngTyp,lat,lng
+            speed = spd
+            course = cog
+        else
+            fixed = false
+        end
+        if psUtcTime and gpsFind == "A" and gpsTime and gpsDate and gpsTime ~= "" and gpsDate ~= "" then
+            local yy,mm,dd,h,m,s = tonumber(ssub(gpsDate,5,6)),tonumber(ssub(gpsDate,3,4)),tonumber(ssub(gpsDate,1,2)),tonumber(ssub(gpsTime,1,2)),tonumber(ssub(gpsTime,3,4)),tonumber(ssub(gpsTime,5,6))
+            UtcTime = {year=2000+yy,month=mm,day=dd,hour=h,min=m,sec=s}
+        end
+    elseif smatch(s,"GPGSV") then
+        viewedGpsSateCnt = tonumber(smatch(s,"%d+,%d+,(%d+)") or "0")
+        if psGsv then getstrength(s) end
+    elseif smatch(s,"BDGSV") then
+        viewedBdSateCnt = tonumber(smatch(s,"%d+,%d+,(%d+)") or "0")
+		if psGsv then getstrength(s) end
+    elseif smatch(s,"GSA") then
+        if psSn then
+            local satesn = smatch(s,"GSA,%w*,%d*,(%d*,%d*,%d*,%d*,%d*,%d*,%d*,%d*,%d*,%d*,%d*,%d*,)") or ""
+            if slen(satesn) > 0 and smatch(satesn,"%d+,") then
+                SateSn = satesn
+            end
+        end
+    end
+
+    if filterSeconds>0 and fixed and not fixFlag and not filteredFlag then
+        if not sys.timerIsActive(filterTimerFnc) then
+            log.info("gps.filterTimerFnc begin")
+            sys.publish("GPS_STATE","LOCATION_FILTER")
+            sys.timerStart(filterTimerFnc,filterSeconds*1000)
+        end
+        return
+    end
+
+    --ÂÆö‰ΩçÊàêÂäü
+    if fixed then
+        if not fixFlag then
+            fixFlag,filteredFlag = true,true
+            fixFailCnt = 0
+            sys.publish("GPS_STATE","LOCATION_SUCCESS")
+        end
+    elseif fixed==false then
+        if fixFlag then
+            fixFailCnt = fixFailCnt+1
+            if fixFailCnt>=20 then
+                fixFlag,filteredFlag = false
+                sys.timerStop(filterTimerFnc)
+                sys.publish("GPS_STATE","LOCATION_FAIL")
+            end
+        end
+    end
 end
 
-local function filter(LA,RA,LL,RL)
-	if slen(LA) ~= 4 or (slen(LL) ~= 5 and slen(LL) ~= 4) then
-		print("err LA or LL", LA, LL)
-		return
-	end
+local function taskRead()
+    local cacheData = ""
+    local co = coroutine.running()
+    while true do
+        local s = uart.read(uartID, "*l")
+        if s == "" then
+            uart.on(uartID,"receive",function() coroutine.resume(co) end)
+            coroutine.yield()
+            uart.on(uartID,"receive")
+        else
+            cacheData = cacheData..s
+            local d1,d2,nemaStr = sfind(cacheData,"\r\n")
+            while d1 do
+                writePendingCmds()
+                nemaStr = ssub(cacheData,1,d2)
+                cacheData = ssub(cacheData,d2+1,-1)
 
-	if slen(RA) < 4 then
-		RA = RA .. srep("0", 4 - slen(RA))
-	end
-	if slen(RL) < 4 then
-		RL = RL .. srep("0", 4 - slen(RL))
-	end
-	local A = LA .. ssub(RA,1,4)
-	local L = LL .. ssub(RL,1,4)
-	A = tonumber(A) or 0
-	L = tonumber(L) or 0
+                if nmeaMode==0 or nmeaMode==2 then
+                    --Ëß£Êûê‰∏ÄË°åNEMAÊï∞ÊçÆ
+                    parseNmea(nemaStr)
+                end
+                if (nmeaMode==1 or nmeaMode==2) and nmeaCbFnc then
+                    nmeaCbFnc(nemaStr)
+                end
+                d1,d2 = sfind(cacheData,"\r\n")
+            end
+        end
+    end
+end
 
-	return push(A, L)
+--- GPS‰∏≤Âè£ÂÜôÂëΩ‰ª§Êìç‰Ωú
+-- @string cmdÔºåGPSÊåá‰ª§(cmdÊ†ºÂºèÔºö"$PGKC149,1,115200*"ÊàñËÄÖ"$PGKC149,1,115200*XX\r\n")
+-- @bool isFullÔºåcmdÊòØÂê¶‰∏∫ÂÆåÊï¥ÁöÑÊåá‰ª§Ê†ºÂºèÔºåÂåÖÊã¨Ê†°È™åÂíå‰ª•Âèä\r\nÔºõtrueË°®Á§∫ÂÆåÊï¥ÔºåfalseÊàñËÄÖnil‰∏∫‰∏çÂÆåÊï¥
+-- @return nil
+-- @usage gps.writeCmd(cmd)
+function writeCmd(cmd,isFull)
+    local tmp = cmd
+    if not isFull then
+        tmp = 0
+        for i=2,cmd:len()-1 do
+            tmp = bit.bxor(tmp,cmd:byte(i))
+        end
+        tmp = cmd..(string.format("%02X",tmp)):upper().."\r\n"
+    end
+    uart.write(uartID,tmp)
+    log.info("gps.writecmd",tmp)
+    --log.info("gps.writecmd",tmp:toHex())
+end
+
+function writePendingCmds()
+    if not aerialModeSetted and aerialModeStr~="" then writeCmd(aerialModeStr) aerialModeSetted=true end
+    if not runModeSetted and runModeStr~="" then writeCmd(runModeStr) runModeSetted=true end
+    if not nmeaReportSetted and nmeaReportStr~="" then writeCmd(nmeaReportStr) nmeaReportSetted=true end
+    if not nmeaReportFreqSetted and nmeaReportFreqStr~="" then writeCmd(nmeaReportFreqStr) nmeaReportFreqSetted=true end
+end
+
+local function _open()
+    if openFlag then return end
+    pm.wake("gps.lua")
+    uart.setup(uartID,uartBaudrate,uartDatabits,uartParity,uartStopbits)
+    sys.taskInit(taskRead)
+    if powerCbFnc then
+        powerCbFnc(true)
+    else
+        pmd.ldoset(7,pmd.LDO_VCAM)
+        rtos.sys32k_clk_out(1)
+    end
+    openFlag = true
+    sys.publish("GPS_STATE","OPEN")
+    fixFlag,filteredFlag = false
+    Ggalng,Ggalat,Gsv,Sep = "","",""
+    log.info("gps._open")
+end
+
+local function _close()
+    if not openFlag then return end
+    if powerCbFnc then
+        powerCbFnc(false)
+    else
+        pmd.ldoset(0,pmd.LDO_VCAM)
+        rtos.sys32k_clk_out(0)
+    end
+    uart.close(uartID)
+    pm.sleep("gps.lua")
+    openFlag = false
+    sys.publish("GPS_STATE","CLOSE",fixFlag)
+    fixFlag,filteredFlag = false
+    sys.timerStop(filterTimerFnc)
+    Ggalng,Ggalat,Gsv,Sep = "","",""
+    aerialModeSetted,runModeSetted,nmeaReportSetted,nmeaReportFreqSetted = nil
+    log.info("gps._close")
+end
+
+
+--- GPSÂ∫îÁî®Ê®°Âºè1.
+--
+-- ÊâìÂºÄGPSÂêéÔºåGPSÂÆö‰ΩçÊàêÂäüÊó∂ÔºåÂ¶ÇÊûúÊúâÂõûË∞ÉÂáΩÊï∞Ôºå‰ºöË∞ÉÁî®ÂõûË∞ÉÂáΩÊï∞
+--
+-- ‰ΩøÁî®Ê≠§Â∫îÁî®Ê®°ÂºèË∞ÉÁî®gps.openÊâìÂºÄÁöÑ‚ÄúGPSÂ∫îÁî®‚ÄùÔºåÂøÖÈ°ª‰∏ªÂä®Ë∞ÉÁî®gps.closeÊàñËÄÖgps.closeAllÊâçËÉΩÂÖ≥Èó≠Ê≠§‚ÄúGPSÂ∫îÁî®‚Äù,‰∏ªÂä®ÂÖ≥Èó≠Êó∂ÔºåÂç≥‰ΩøÊúâÂõûË∞ÉÂáΩÊï∞Ôºå‰πü‰∏ç‰ºöË∞ÉÁî®ÂõûË∞ÉÂáΩÊï∞
+DEFAULT = 1
+--- GPSÂ∫îÁî®Ê®°Âºè2.
+--
+-- ÊâìÂºÄGPSÂêéÔºåÂ¶ÇÊûúÂú®GPSÂºÄÂêØÊúÄÂ§ßÊó∂ÈïøÂà∞ËææÊó∂ÔºåÊ≤°ÊúâÂÆö‰ΩçÊàêÂäüÔºåÂ¶ÇÊûúÊúâÂõûË∞ÉÂáΩÊï∞Ôºå‰ºöË∞ÉÁî®ÂõûË∞ÉÂáΩÊï∞ÔºåÁÑ∂ÂêéËá™Âä®ÂÖ≥Èó≠Ê≠§‚ÄúGPSÂ∫îÁî®‚Äù
+--
+-- ÊâìÂºÄGPSÂêéÔºåÂ¶ÇÊûúÂú®GPSÂºÄÂêØÊúÄÂ§ßÊó∂ÈïøÂÜÖÔºåÂÆö‰ΩçÊàêÂäüÔºåÂ¶ÇÊûúÊúâÂõûË∞ÉÂáΩÊï∞Ôºå‰ºöË∞ÉÁî®ÂõûË∞ÉÂáΩÊï∞ÔºåÁÑ∂ÂêéËá™Âä®ÂÖ≥Èó≠Ê≠§‚ÄúGPSÂ∫îÁî®‚Äù
+--
+-- ÊâìÂºÄGPSÂêéÔºåÂú®Ëá™Âä®ÂÖ≥Èó≠Ê≠§‚ÄúGPSÂ∫îÁî®‚ÄùÂâçÔºåÂèØ‰ª•Ë∞ÉÁî®gps.closeÊàñËÄÖgps.closeAll‰∏ªÂä®ÂÖ≥Èó≠Ê≠§‚ÄúGPSÂ∫îÁî®‚ÄùÔºå‰∏ªÂä®ÂÖ≥Èó≠Êó∂ÔºåÂç≥‰ΩøÊúâÂõûË∞ÉÂáΩÊï∞Ôºå‰πü‰∏ç‰ºöË∞ÉÁî®ÂõûË∞ÉÂáΩÊï∞
+TIMERORSUC = 2
+--- GPSÂ∫îÁî®Ê®°Âºè3.
+--
+-- ÊâìÂºÄGPSÂêéÔºåÂú®GPSÂºÄÂêØÊúÄÂ§ßÊó∂ÈïøÊó∂Èó¥Âà∞ËææÊó∂ÔºåÊó†ËÆ∫ÊòØÂê¶ÂÆö‰ΩçÊàêÂäüÔºåÂ¶ÇÊûúÊúâÂõûË∞ÉÂáΩÊï∞Ôºå‰ºöË∞ÉÁî®ÂõûË∞ÉÂáΩÊï∞ÔºåÁÑ∂ÂêéËá™Âä®ÂÖ≥Èó≠Ê≠§‚ÄúGPSÂ∫îÁî®‚Äù
+--
+-- ÊâìÂºÄGPSÂêéÔºåÂú®Ëá™Âä®ÂÖ≥Èó≠Ê≠§‚ÄúGPSÂ∫îÁî®‚ÄùÂâçÔºåÂèØ‰ª•Ë∞ÉÁî®gps.closeÊàñËÄÖgps.closeAll‰∏ªÂä®ÂÖ≥Èó≠Ê≠§‚ÄúGPSÂ∫îÁî®‚ÄùÔºå‰∏ªÂä®ÂÖ≥Èó≠Êó∂ÔºåÂç≥‰ΩøÊúâÂõûË∞ÉÂáΩÊï∞Ôºå‰πü‰∏ç‰ºöË∞ÉÁî®ÂõûË∞ÉÂáΩÊï∞
+TIMER = 3
+
+--‚ÄúGPSÂ∫îÁî®‚ÄùË°®
+local tList = {}
+
+--[[
+ÂáΩÊï∞ÂêçÔºödelItem
+ÂäüËÉΩ  Ôºö‰ªé‚ÄúGPSÂ∫îÁî®‚ÄùË°®‰∏≠Âà†Èô§‰∏ÄÈ°π‚ÄúGPSÂ∫îÁî®‚ÄùÔºåÂπ∂‰∏çÊòØÁúüÊ≠£ÁöÑÂà†Èô§ÔºåÂè™ÊòØËÆæÁΩÆ‰∏Ä‰∏™Êó†ÊïàÊ†áÂøó
+ÂèÇÊï∞  Ôºö
+        modeÔºöGPSÂ∫îÁî®Ê®°Âºè
+        paraÔºö
+            para.tagÔºö‚ÄúGPSÂ∫îÁî®‚ÄùÊ†áËÆ∞
+            para.valÔºöGPSÂºÄÂêØÊúÄÂ§ßÊó∂Èïø
+            para.cbÔºöÂõûË∞ÉÂáΩÊï∞
+ËøîÂõûÂÄºÔºöÊó†
+]]
+local function delItem(mode,para)
+    for i=1,#tList do
+        --Ê†áÂøóÊúâÊïà Âπ∂‰∏î GPSÂ∫îÁî®Ê®°ÂºèÁõ∏Âêå Âπ∂‰∏î ‚ÄúGPSÂ∫îÁî®‚ÄùÊ†áËÆ∞Áõ∏Âêå
+        if tList[i].flag and tList[i].mode==mode and tList[i].para.tag==para.tag then
+            --ËÆæÁΩÆÊó†ÊïàÊ†áÂøó
+            tList[i].flag,tList[i].delay = false
+            break
+        end
+    end
 end
 
 --[[
-∫Ø ˝√˚£∫rtctolocal
-π¶ƒ‹  £∫GPS ±º‰◊™ªØŒ™±æƒ£øÈƒ⁄…Ë÷√µƒ ±«¯ ±º‰
-≤Œ ˝  £∫
-		y,m,d,hh,mm,ss£∫GPS ±º‰÷–µƒƒÍ‘¬»’ ±∑÷√Î
-∑µªÿ÷µ£∫±æƒ£øÈƒ⁄…Ë÷√µƒ ±«¯ ±º‰(table¿‡–Õ£¨t.year,t.month,t.day,t.hour,t.min,t.sec)
+ÂáΩÊï∞ÂêçÔºöaddItem
+ÂäüËÉΩ  ÔºöÊñ∞Â¢û‰∏ÄÈ°π‚ÄúGPSÂ∫îÁî®‚ÄùÂà∞‚ÄúGPSÂ∫îÁî®‚ÄùË°®
+ÂèÇÊï∞  Ôºö
+        modeÔºöGPSÂ∫îÁî®Ê®°Âºè
+        paraÔºö
+            para.tagÔºö‚ÄúGPSÂ∫îÁî®‚ÄùÊ†áËÆ∞
+            para.valÔºöGPSÂºÄÂêØÊúÄÂ§ßÊó∂Èïø
+            para.cbÔºöÂõûË∞ÉÂáΩÊï∞
+ËøîÂõûÂÄºÔºöÊó†
 ]]
-local function rtctolocal(y,m,d,hh,mm,ss)
-	--print("rtctolocal",y,m,d,hh,mm,ss)
-	local flg
-	if not y or not m or not d or not hh or not mm or not ss then
-		return
-	end
-	if gps.timezone == GPS_BEIJING_TIME then
-		hh = hh + 8
-		flg = true
-	elseif gps.timezone == GPS_VIETNAM_TIME then
-		hh = hh + 7
-		flg = true
-	end
-	if flg then
-		if hh >= 24 then
-			hh = hh - 24
-			d = d + 1
-			if m == 4 or m == 6 or m == 9 or m == 11 then
-				if d > 30 then
-					d = 1
-					m = m + 1
-				end
-			elseif m == 1 or m == 3 or m == 5 or m == 7 or m == 8 or m == 10 then
-				if d > 31 then
-					d = 1
-					m = m + 1
-				end
-			elseif m == 12 then
-				if d > 31 then
-					d = 1
-					m = 1
-					y = y + 1
-				end
-			elseif m == 2 then
-				if (((y+2000)%400) == 0) or (((y+2000)%4 == 0) and ((y+2000)%100 ~=0)) then
-					if d > 29 then
-						d = 1
-						m = 3
-					end
-				else
-					if d > 28 then
-						d = 1
-						m = 3
-					end
-				end
-			end
-		end
-	end
-	local t = {}
-	t.year,t.month,t.day,t.hour,t.min,t.sec = 2000 + y,m,d,hh,mm,ss
-	return t
+local function addItem(mode,para)
+    --Âà†Èô§Áõ∏ÂêåÁöÑ‚ÄúGPSÂ∫îÁî®‚Äù
+    delItem(mode,para)
+    local item,i,fnd = {flag=true, mode=mode, para=para}
+    --Â¶ÇÊûúÊòØTIMERORSUCÊàñËÄÖTIMERÊ®°ÂºèÔºåÂàùÂßãÂåñGPSÂ∑•‰ΩúÂâ©‰ΩôÊó∂Èó¥
+    if mode==TIMERORSUC or mode==TIMER then item.para.remain = para.val end
+    for i=1,#tList do
+        --Â¶ÇÊûúÂ≠òÂú®Êó†ÊïàÁöÑ‚ÄúGPSÂ∫îÁî®‚ÄùÈ°πÔºåÁõ¥Êé•‰ΩøÁî®Ê≠§‰ΩçÁΩÆ
+        if not tList[i].flag then
+            tList[i] = item
+            fnd = true
+            break
+        end
+    end
+    --Êñ∞Â¢û‰∏ÄÈ°π
+    if not fnd then table.insert(tList,item) end
+end
+
+local function existTimerItem()
+    for i=1,#tList do
+        if tList[i].flag and (tList[i].mode==TIMERORSUC or tList[i].mode==TIMER or tList[i].para.delay) then return true end
+    end
+end
+
+local function timerFnc()
+    for i=1,#tList do
+        if tList[i].flag then
+            log.info("gps.timerFnc@"..i,tList[i].mode,tList[i].para.tag,tList[i].para.val,tList[i].para.remain,tList[i].para.delay)
+            local rmn,dly,md,cb = tList[i].para.remain,tList[i].para.delay,tList[i].mode,tList[i].para.cb
+
+            if rmn and rmn>0 then
+                tList[i].para.remain = rmn-1
+            end
+            if dly and dly>0 then
+                tList[i].para.delay = dly-1
+            end
+            rmn = tList[i].para.remain
+
+            if isFix() and md==TIMER and rmn==0 and not tList[i].para.delay then
+                tList[i].para.delay = 1
+            end
+
+            dly = tList[i].para.delay
+            if isFix() then
+                if dly and dly==0 then
+                    if cb then cb(tList[i].para.tag) end
+                    if md == DEFAULT then
+                        tList[i].para.delay = nil
+                    else
+                        close(md,tList[i].para)
+                    end
+                end
+            else
+                if rmn and rmn == 0 then
+                    if cb then cb(tList[i].para.tag) end
+                    close(md,tList[i].para)
+                end
+            end
+        end
+    end
+    if existTimerItem() then sys.timerStart(timerFnc,1000) end
 end
 
 --[[
-∫Ø ˝√˚£∫needupdatetime
-π¶ƒ‹  £∫ «∑Ò–Ë“™∏¸–¬œµÕ≥ ±º‰Œ™–¬ ±º‰
-≤Œ ˝  £∫
-		newtime£∫–¬ ±º‰
-∑µªÿ÷µ£∫true–Ë“™∏¸–¬£¨false≤ª–Ë“™∏¸–¬
+ÂáΩÊï∞ÂêçÔºöstatInd
+ÂäüËÉΩ  ÔºöÂ§ÑÁêÜGPSÂÆö‰ΩçÊàêÂäüÁöÑÊ∂àÊÅØ
+ÂèÇÊï∞  Ôºö
+        evtÔºöGPSÊ∂àÊÅØÁ±ªÂûã
+ËøîÂõûÂÄºÔºöÊó†
 ]]
-function needupdatetime(newtime)
-	if newtime and os.time(newtime) and os.date("*t") and os.time(os.date("*t")) then
-		local secdif = os.difftime(os.time(os.date("*t")),os.time(newtime))
-		if secdif and secdif >= 60 or secdif <= -60 then
-			print("needupdatetime",secdif)
-			return true
-		end
-	end
-	return false
+local function statInd(evt)
+    --ÂÆö‰ΩçÊàêÂäüÁöÑÊ∂àÊÅØ
+    if evt == "LOCATION_SUCCESS" then
+        for i=1,#tList do
+            log.info("gps.statInd@"..i,tList[i].flag,tList[i].mode,tList[i].para.tag,tList[i].para.val,tList[i].para.remain,tList[i].para.delay,tList[i].para.cb)
+            if tList[i].flag then
+                if tList[i].mode ~= TIMER then
+                    tList[i].para.delay = 1
+                    if tList[i].mode == DEFAULT then
+                        if existTimerItem() then sys.timerStart(timerFnc,1000) end
+                    end
+                end
+            end
+        end
+    end
 end
 
---[[
-∫Ø ˝√˚£∫proc
-π¶ƒ‹  £∫¥¶¿Ì√øÃıNEMA ˝æ›
-≤Œ ˝  £∫
-		s£∫“ªÃıNEMA ˝æ›
-∑µªÿ÷µ£∫Œﬁ
-]]
-local function proc(s)
-	local latti,lattir,longti,longtir,spd1,cog1,gpsfind,gpstime,gpsdate,numofsate,numoflocationsate,hdp,latyp,longtyp
-
-	if s == "" or s == nil then
-		return
-	end
-	
-	--print("syy proc",s)
-	
-	if ("AAF00C0001009500039B0D0A" == common.binstohexs(s)) then
-		sys.dispatch(GPS_STATE_IND,GPS_BINARY_ACK_EVT)
-	elseif string.find(common.binstohexs(s),"^AAF00C000300") then
-		if string.find(common.binstohexs(s),"^AAF00C000300FFFF") then
-			sys.dispatch(GPS_STATE_IND,GPS_BINW_END_ACK_EVT)			
-		else
-			sys.dispatch(GPS_STATE_IND,GPS_BINW_ACK_EVT)
-		end		
-	elseif string.find(s,"$PGKC001,105,3") then
-	end
-
-	gps.find = ""
-
-	--GGA ˝æ›
-	if smatch(s, "GGA") then
-		local hh
-		latti,lattir,latyp,longti,longtir,longtyp,gpsfind,numoflocationsate,hdp,hh = smatch(s,"GGA,%d+%.%d+,(%d+)%.(%d+),([NS]),(%d+)%.(%d+),([EW]),(%d),(%d+),([%d%.]*),(.*),M,.*,M")
-		if (gpsfind == "1" or gpsfind == "2" or gpsfind == "4") and longti ~= nil and longtir ~= nil and latti ~= nil and lattir ~= nil then
-			gps.find = "S"
-			if hh ~= nil then
-				gps.haiba = hh
-			end
-			if latyp=="N" or latyp=="S" then
-				gps.latyp = latyp
-			end
-			if longtyp=="E" or longtyp=="W" then
-				gps.longtyp = longtyp
-			end
-		end
-	--RMC ˝æ›
-	elseif smatch(s, "RMC") then
-		gpstime,gpsfind,latti,lattir,latyp,longti,longtir,longtyp,spd1,cog1,gpsdate = smatch(s,"RMC,(%d%d%d%d%d%d)%.%d+,(%w),(%d*)%.*(%d*),([NS]*),(%d*)%.*(%d*),([EW]*),(.-),(.-),(%d%d%d%d%d%d),")
-		if gpsfind == "A" and longti ~= nil and longtir ~= nil and latti ~= nil and lattir ~= nil and longti ~= "" and longtir ~= "" and latti ~= "" and lattir ~= "" then
-			gps.find = "S"
-			if latyp=="N" or latyp=="S" then
-				gps.latyp = latyp
-			end
-			if longtyp=="E" or longtyp=="W" then
-				gps.longtyp = longtyp
-			end
-		end
-		if gpstime and gpsdate and gpstime ~= "" and gpsdate ~= "" then
-			local yy,mm,dd,h,m,s = tonumber(ssub(gpsdate,5,6)),tonumber(ssub(gpsdate,3,4)),tonumber(ssub(gpsdate,1,2)),tonumber(ssub(gpstime,1,2)),tonumber(ssub(gpstime,3,4)),tonumber(ssub(gpstime,5,6))
-			gps.utctime = {year=2000+yy,month=mm,day=dd,hour=h,min=m,sec=s}
-			if gps.timezone and yy>=17 then
-				local newtime = rtctolocal(yy,mm,dd,h,m,s)
-				if needupdatetime(newtime) then
-					misc.setclock(newtime)
-				end
-			end
-		end
-	--GSV ˝æ›
-	elseif smatch(s,"GSV") then
-		numofsate = smatch(s,"GSV,%d+,%d+,(%d+)")
-		getstrength(s)
-	--GSA ˝æ›
-	elseif smatch(s,"GSA") then
-		gps.fix = smatch(s,"GSA,%w*,(%d*),") or 0
-		local satesn = smatch(s,"GSA,%w*,%d*,(%d*,%d*,%d*,%d*,%d*,%d*,%d*,%d*,%d*,%d*,%d*,%d*,)") or ""
-		if slen(satesn) > 0 and smatch(satesn,"%d+,") then
-			gps.satesn = satesn
-		end
-	end
-
-	--∂®Œª≥…π¶
-	if gps.find == "S" then
-		if gps.filterbgn == nil and gps.filtertime > 0 then
-			gps.filterbgn = c.gps
-			gps.find = ""
-			print("filter gps " .. gps.filtertime .. " secs begin")
-			sys.dispatch(GPS_STATE_IND,GPS_LOCATION_UNFILTER_SUC_EVT)
-			return
-		elseif gps.filterbgn and c.gps - gps.filterbgn < gps.filtertime then
-			gps.find = ""
-			return
-		end
-	end
-	
-	if gps.fix == "3" and gps.find == "S" and gps.ds3d == 0 then
-		sys.dispatch(GPS_STATE_IND,GPS_LOCATION_SUC_3D_EVT)
-		gps.ds3d = 1
-	end
-			
-	--ø…º˚Œ¿–«∏ˆ ˝
-	numofsate = tonumber(numofsate or "0")
-	if numofsate > 12 then
-		numofsate = 12
-	end
-	if numofsate > 0 then
-		gps.satenum = numofsate
-	end
-
-	--∂®Œª π”√µƒŒ¿–«∏ˆ ˝
-	numoflocationsate = tonumber(numoflocationsate or "0")
-	if numoflocationsate > 12 then
-		numoflocationsate = 12
-	end
-	if numoflocationsate > 0 then
-		gps.locationsatenum = numoflocationsate
-	end
-
-	--ÀŸ∂»
-	if spd1 and spd1 ~= "" then
-		local r1,r2 = smatch(spd1, "(%d+)%.*(%d*)")
-		if r1 then
-			if gps.spdtyp == GPS_KILOMETER_SPD then
-				gps.spd = (tonumber(r1)*1852-(tonumber(r1)*1852%1000))/1000
-			else
-				gps.spd = tonumber(r1)
-			end
-		end
-	end
-	
-	--∑ΩœÚΩ«
-	if cog1 and cog1 ~= "" then
-		local r1,r2 = smatch(cog1, "(%d+)%.*(%d*)")
-		if r1 then
-			gps.cog = tonumber(r1)
-		end
-	end
-
-	if gps.find ~= "S" then
-		return
-	end
-
-	--æ≠Œ≥∂»
-	local LA, RA, LL, RL = filter(latti,lattir,longti,longtir)
-	--print("filterg", LA, RA, LL, RL)
-	if not LA or not RA or not LL or not RL then
-		return
-	end
-
-	gps.olati, gps.lati = getmilli(LA, RA)
-	gps.olong, gps.long = getmilli(LL, RL)
-	gps.long = gps.long or 0
-	gps.lati = gps.lati or 0
-	gps.olong = gps.olong or 0
-	gps.olati = gps.olati or 0
-end
-
---[[
-∫Ø ˝√˚£∫diffofloc
-π¶ƒ‹  £∫º∆À„¡Ω∂‘æ≠Œ≥∂»÷Æº‰µƒ÷±œﬂæ‡¿Î£®Ω¸À∆÷µ£©
-≤Œ ˝  £∫
-		latti1£∫Œ≥∂»1£®∂»∏Ò Ω£¨¿˝»Á31.12345∂»£©
-		longti1£∫æ≠∂»1£®∂»∏Ò Ω£©
-		latti2£∫Œ≥∂»2£®∂»∏Ò Ω£©
-		longti2£∫æ≠∂»2£®∂»∏Ò Ω£©
-		typ£∫æ‡¿Î¿‡–Õ
-∑µªÿ÷µ£∫typ»Áπ˚Œ™true£¨∑µªÿµƒ «÷±œﬂæ‡¿Î(µ•Œª√◊)µƒ∆Ω∑Ω∫Õ£ª∑Ò‘Ú∑µªÿµƒ «÷±œﬂæ‡¿Î(µ•Œª√◊)
-]]
-function diffofloc(latti1, longti1, latti2, longti2,typ) --typ=true:∑µªÿa+b ; ∑Ò‘Ú «∆Ω∑Ω∫Õ
-	local I1,I2,R1,R2,diff,d
-	I1,R1=smatch(latti1,"(%d+)%.(%d+)")
-	I2,R2=smatch(latti2,"(%d+)%.(%d+)")
-	if not I1 or not I2 or not R1 or not R2 then
-		return 0
-	end
-
-	R1 = I1 .. ssub(R1,1,5)
-	R2 = I2 .. ssub(R2,1,5)
-	d = tonumber(R1)-tonumber(R2)
-	d = (d*111-(d*111%100))/100
-	if typ == true then
-		diff =  (d>0 and d or (-d))
-	else
-		diff = d * d
-	end
-		
-	I1,R1=smatch(longti1,"(%d+)%.(%d+)")
-	I2,R2=smatch(longti2,"(%d+)%.(%d+)")
-	if not I1 or not I2 or not R1 or not R2 then
-		return 0
-	end
-
-	R1 = I1 .. ssub(R1,1,5)
-	R2 = I2 .. ssub(R2,1,5)
-	d = tonumber(R1)-tonumber(R2)
-	if typ == true then
-		diff =  diff + (d>0 and d or (-d))
-	else
-		diff =  diff + d*d
-	end
-	--diff =  diff + d*d
-	print("all diff:", diff)
-	return diff
-end
-
-
---[[
-∫Ø ˝√˚£∫setmnea
-π¶ƒ‹  £∫…Ë÷√°∞ «∑ÒΩ´NEMA ˝æ›≈◊≥ˆ£¨Ã·π©∏¯Õ‚≤ø”¶”√¥¶¿Ì°±±Í÷æ
-≤Œ ˝  £∫
-		flg£∫trueŒ™≈◊≥ˆNEMA ˝æ›£¨falseªÚ’ﬂnil≤ª≈◊≥ˆ£ª»Áπ˚…Ë÷√¡À≈◊≥ˆ£¨Õ‚≤ø”¶”√◊¢≤·ƒ⁄≤øœ˚œ¢"GPS_NMEA_DATA"µƒ¥¶¿Ì∫Ø ˝º¥ø…Ω” ’NEMA ˝æ›
-∑µªÿ÷µ£∫Œﬁ
-]]
-function setmnea(flg)
-	nmea_route = flg
-end
-
---[[
-∫Ø ˝√˚£∫read
-π¶ƒ‹  £∫¥Æø⁄ ˝æ›Ω” ’¥¶¿Ì∫Ø ˝
-≤Œ ˝  £∫Œﬁ
-∑µªÿ÷µ£∫Œﬁ
-]]
-local function read()
-	local gpsreadloop = true
-	if gps.open then
-		--∆Ù∂Ø1√Îµƒ∂® ±∆˜£¨√ø√Î»•∂¡“ª¥Œ¥Æø⁄ ˝æ›
-		sys.timer_start(read,gps.period)
-	end
-
-	c.gps = c.gps + 1
-	while gpsreadloop do
-		strgps = strgps..uart.read(gps.uartid, "*l", 0)
-		if slen(strgps) == 0 then
-			--¡¨–¯∂¡¡Ànogpschipcnt¥Œ¥Æø⁄£¨∂º√ª”– ˝æ›£¨‘Ú»œŒ™√ª”–gps–æ∆¨
-			if not c.nogps and c.hasgps == 0 and c.gps >= nogpschipcnt then
-				sys.dispatch(GPS_STATE_IND,GPS_NO_CHIP_EVT)
-				c.nogps = true
-				return
-			end
-			gpsreadloop = false
-		else
-			--¥Æø⁄”– ˝æ›£¨‘Ú»œŒ™”–gps–æ∆¨
-			if c.hasgps == 0 then
-				c.hasgps = c.gps
-				sys.dispatch(GPS_STATE_IND,GPS_HAS_CHIP_EVT)
-			end
-		end
-		--∂¡»°“ª––NEMA ˝æ›
-		local d1,d2,itemstr = sfind(strgps,"\r\n")
-		while d1 do
-			itemstr = ssub(strgps,1,d1+1)
-			strgps = ssub(strgps,d2+1,-1)
-			
-			if gps.nemamode==0 or gps.nemamode==2 then
-				--Ω‚Œˆ“ª––NEMA ˝æ›
-				proc(itemstr)			
-				if c.gpsprt ~= c.gps then
-					c.gpsprt = c.gps
-					print("gps rlt", gps.longtyp,gps.olong,gps.long,gps.latyp,gps.olati,gps.lati,gps.locationsatenum,gps.sn,gps.satenum)
-				end
-				--∂®Œª≥…π¶
-				if gps.find == "S" then
-					gps.findall = true
-					c.gpsfind = c.gps
-					local oldstat = gps.state
-					gps.state = 1
-					if oldstat ~= 1 then
-						sys.dispatch(GPS_STATE_IND,GPS_LOCATION_SUC_EVT)
-						print("dispatch GPS_LOCATION_SUC_EVT")
-						c.fixitv = c.gps-c.fixbgn
-					end
-				--∂®Œª ß∞‹
-				elseif ((c.gps - c.gpsfind) > 20) and gps.state == 1 then
-					print("location fail")
-					c.fixbgn = c.gps
-					sys.dispatch(GPS_STATE_IND,GPS_LOCATION_FAIL_EVT)
-					print("dispatch GPS_LOCATION_FAIL_EVT")				
-					gps.findall = false
-					gps.state = 2
-					gps.satenum = 0
-					gps.locationsatenum = 0
-					gps.filterbgn = nil
-					gps.spd = 0			
-				end
-			end
-			if (gps.nemamode==1 or gps.nemamode==2) and gps.nemacb then
-				gps.nemacb(itemstr)
-			end			
-			d1,d2 = sfind(strgps,"\r\n")
-		end		
-	end
-end
-
-function writegk(data)
-	print("syy writegk",data)
-	uart.write(gps.uartid,data)	
-end
-
---cmd∏Ò Ω£∫"$PGKC149,1,115200*"
-local function writecmd(cmd)
-	print("writecmd",cmd)
-	local tmp,i = 0
-	for i=2,slen(cmd)-1 do
-		tmp = bit.bxor(tmp,sbyte(cmd,i))
-	end	
-	tmp = string.upper(string.format("%02X",tmp))	
-	writegk(cmd..tmp.."\r\n")
-end
-
---[[
-∫Ø ˝√˚£∫opengps
-π¶ƒ‹  £∫¥Úø™GPS
-≤Œ ˝  £∫
-		tag£∫¥Úø™±Íº«£¨”√¿¥±Ì æƒƒ“ª∏ˆ”¶”√¥Úø™¡ÀGPS
-∑µªÿ÷µ£∫Œﬁ
-]]
-function opengps(tag)
-	print("opengps",tag)
-	gps.opentags[tag] = 1
-	if gps.open then
-		print("gps has open")
-		return
-	end
-	pm.wake("gps")
-	gps.open = true
-	openuart()
-	gps.filterbgn = nil
-	if gps.io then
-		if gps.edge then
-			pio.pin.sethigh(gps.io)
-		else
-			pio.pin.setlow(gps.io)
-		end
-	end
-	pmd.ldoset(7,pmd.LDO_VCAM)
-	setfixmode(gps.fixmode)
-	setnemamode(gps.nemamode,gps.nemacb)
-	print("gps open")
-	c.fixbgn = c.gps
-	sys.dispatch(GPS_STATE_IND,GPS_OPEN_EVT)
-end
-
---[[
-∫Ø ˝√˚£∫closegps
-π¶ƒ‹  £∫πÿ±’GPS
-≤Œ ˝  £∫
-		tag£∫πÿ±’±Íº«£¨”√¿¥±Ì æƒƒ“ª∏ˆ”¶”√πÿ±’¡ÀGPS
-∑µªÿ÷µ£∫Œﬁ
-]]
-function closegps(tag)
-	print("closegps",tag)
-	gps.opentags[tag] = 0
-	for k,v in pairs(gps.opentags) do
-		if v > 0 then
-			print("gps close using",k)
-			return
-		end
-	end
-
-	if not gps.open then
-		print("gps has close")
-		return
-	end
-
-	if gps.io then
-		if gps.edge then
-			pio.pin.setlow(gps.io)
-		else
-			pio.pin.sethigh(gps.io)
-		end
-	end
-	pmd.ldoset(0,pmd.LDO_VCAM)
-	closeuart()
-	pm.sleep("gps")	
-	gps.open = false
-	if gps.state == 1 then
-		gps.state = 2
-	end	
-	gps.spd = 0
-	gps.cog = 0
-	gps.haiba = 0
-	gps.satesn = ""
-	gps.find = ""
-	gps.findall = false
-	gps.satenum = 0
-	gps.locationsatenum = 0
-	gps.sn,gps.sn1 = 0,0
-	gps.sates = ""
-	gps.gsv = ""
-	gps.ds3d = 0
-	print("gps close")
-	sys.dispatch(GPS_STATE_IND,GPS_CLOSE_EVT)
-end
-
---[[
-∫Ø ˝√˚£∫getgpslocation
-π¶ƒ‹  £∫ªÒ»°GPSæ≠Œ≥∂»–≈œ¢
-≤Œ ˝  £∫
-		format£∫æ≠Œ≥∂»∏Ò Ω£¨ƒ¨»œŒ™∂»∏Ò ΩGPS_DEGREES£¨÷ß≥÷GPS_DEGREES∫ÕGPS_DEGREES_MINUTES
-∑µªÿ÷µ£∫æ≠Œ≥∂»–≈œ¢◊÷∑˚¥Æ£¨¿˝»Á∏Ò ΩŒ™£∫"E,121.12345,N,31.23456"£¨»Áπ˚√ª”–æ≠Œ≥∂»∏Ò ΩŒ™"E,,N,"
-]]
-function getgpslocation(format)
-	local rstr = (gps.longtyp and gps.longtyp or "E") .. ","
-	local lo,la
-	if format == nil or format == GPS_DEGREES then
-		lo,la = gps.long,gps.lati
-	elseif format == GPS_DEGREES_MINUTES then
-		lo,la = gps.olong,gps.olati
-	end
-	if lo and lo ~= 0 and lo ~= "0" and lo ~= "" then
-		rstr = rstr .. lo
-	end
-	rstr = rstr .. "," .. (gps.latyp and gps.latyp or "N") .. ","
-	if la and la ~= 0 and la ~= "0" and la ~= "" then
-		rstr = rstr .. la
-	end
-	return rstr
-end
-
-function getLastLocation()
-    return (gps.long and gps.long~=0) and gps.long or "", (gps.lati and gps.lati~=0) and gps.lati or ""
-end
---[[
-∫Ø ˝√˚£∫getgpssatenum
-π¶ƒ‹  £∫ªÒ»°GPSø…º˚Œ¿–«∏ˆ ˝
-≤Œ ˝  £∫Œﬁ
-∑µªÿ÷µ£∫GPSø…º˚Œ¿–«∏ˆ ˝
-]]
-function getgpssatenum()
-	return gps.satenum or 0
-end
-
---[[
-∫Ø ˝√˚£∫getgpslocationsatenum
-π¶ƒ‹  £∫ªÒ»°GPS∂®Œª π”√µƒŒ¿–«∏ˆ ˝
-≤Œ ˝  £∫Œﬁ
-∑µªÿ÷µ£∫GPS∂®Œª π”√µƒŒ¿–«∏ˆ ˝
-]]
-function getgpslocationsatenum()
-	return gps.locationsatenum or 0
-end
-
---[[
-∫Ø ˝√˚£∫getgpsspd
-π¶ƒ‹  £∫ªÒ»°ÀŸ∂»
-≤Œ ˝  £∫Œﬁ
-∑µªÿ÷µ£∫ÀŸ∂»
-]]
-function getgpsspd()
-	return gps.spd or 0
-end
-
---[[
-∫Ø ˝√˚£∫getgpscog
-π¶ƒ‹  £∫ªÒ»°∑ΩœÚΩ«
-≤Œ ˝  £∫Œﬁ
-∑µªÿ÷µ£∫∑ΩœÚΩ«
-]]
-function getgpscog()
-	return gps.cog or 0
-end
-
---[[
-∫Ø ˝√˚£∫getgpssn
-π¶ƒ‹  £∫ªÒ»°◊Ó«øŒ¿–«µƒ–≈‘Î±»
-≤Œ ˝  £∫Œﬁ
-∑µªÿ÷µ£∫◊Ó«øŒ¿–«µƒ–≈‘Î±»
-]]
-function getgpssn()
-	return gps.sn or 0
-end
-
-function getsn1()
-	return gps.sn1 or 0
-end
-
---[[
-∫Ø ˝√˚£∫isfix
-π¶ƒ‹  £∫ºÏ≤ÈGPS «∑Ò∂®Œª≥…π¶
-≤Œ ˝  £∫Œﬁ
-∑µªÿ÷µ£∫trueŒ™∂®Œª≥…π¶£¨falseŒ™ ß∞‹
-]]
-function isfix()
-	return gps.state == 1
-end
-
---[[
-is3dfix
-π¶ƒ‹  £∫ºÏ≤ÈGPS «∑Ò3D∂®Œª≥…π¶
-≤Œ ˝  £∫Œﬁ
-∑µªÿ÷µ£∫trueŒ™∂®Œª≥…π¶£¨falseŒ™ ß∞‹
-]]
-function is3dfix()
-	return gps.fix == "3"
-end
-
---[[
-∫Ø ˝√˚£∫isopen
-π¶ƒ‹  £∫ºÏ≤ÈGPS «∑Ò¥Úø™
-≤Œ ˝  £∫Œﬁ
-∑µªÿ÷µ£∫trueŒ™¥Úø™£¨falseŒ™πÿ±’
-]]
-function isopen()
-	return gps.open
-end
-
---[[
-∫Ø ˝√˚£∫getaltitude
-π¶ƒ‹  £∫ªÒ»°∏ﬂ∂»
-≤Œ ˝  £∫Œﬁ
-∑µªÿ÷µ£∫∏ﬂ∂»
-]]
-function getaltitude()
-	return gps.haiba or 0
-end
-
-function getsatesn()
-	return gps.satesn or ""
-end
-
-function getgsv()
-	return gps.gsv or ""
-end
-
-function getsatesinfo()
-	local tmp = gps.sates
-	print("getsatesinfo",tmp)
-	local ret = ""
-	if string.len(tmp) > 0 then
-		tmp = string.sub(tmp,1,-2)
-	end
-	local sate = ""
-	for sate in string.gmatch(tmp, "(%d+)") do
-		local id,strength = string.sub(sate,1,2),string.sub(sate,3,4)
-		if id and strength and id <= "32" and strength > "00" then
-			if ret == "" then
-				ret = sate .. " "
-			else
-				local d1,d2,sn = string.find(ret,id .. "(%d+)")
-				if d1 and d2 and sn then
-					if strength > sn then
-						ret = string.sub(ret,1,d1+1) .. strength .. string.sub(ret,d2+1,-1)
-					end
-				else
-					ret = ret .. sate .. " "
-				end
-			end
-		end
-	end
-	if string.len(ret) > 0 then
-		return string.sub(ret,1,-2)
-	else
-		return ret
-	end
-end
-
---[[
-∫Ø ˝√˚£∫init
-π¶ƒ‹  £∫≈‰÷√GPS
-≤Œ ˝  £∫
-		ionum£∫GPSπ©µÁµƒGPIO
-		dir£∫¥À≤Œ ˝√ª”√£®Œ™¡ÀºÊ»›÷Æ«∞µƒ¥˙¬Î£¨≤ªƒ‹»•µÙ£©£¨ÀÊ±„¥´£¨
-		edge£∫true±Ì æGPIO ‰≥ˆ∏ﬂµÁ∆Ωπ©µÁ£¨falseªÚ’ﬂnil±Ì æGPIO ‰≥ˆµÕµÁ∆Ωπ©µÁ
-		period£∫¥Æø⁄∂¡»°NEMA ˝æ›º‰∏Ù£¨µ•Œª∫¡√Î£¨Ω®“È1000∫¡√Î∂¡»°“ª¥Œ
-		id£∫¥Æø⁄ID£¨1±Ì æ¥Æø⁄1,2±Ì æ¥Æø⁄2
-		baud£∫¥Æø⁄≤®Ãÿ¬ £¨¿˝»Á9600
-		databits£∫ ˝æ›Œª£¨¿˝»Á8
-		parity£∫–£—ÈŒª£¨¿˝»Áuart.PAR_NONE
-		stopbits£∫Õ£÷πŒª£¨¿˝»Áuart.STOP_1
-		apgspwronupd£∫ «∑Ò‘ –Ìø™ª˙æÕ÷¥––AGPSπ¶ƒ‹
-∑µªÿ÷µ£∫Œﬁ
-]]
-function init(ionum,dir,edge,period,id,baud,databits,parity,stopbits,apgspwronupd)
-	gps.open = false
-	gps.lati = 0
-	gps.long = 0
-	gps.olati = 0
-	gps.olong = 0
-	gps.latyp = "N"
-	gps.longtyp = "E"
-	gps.spd = 0
-	gps.cog = 0
-	gps.haiba = 0
-	gps.satesn = ""
-	gps.gsv = ""
-	gps.state = 0
-	gps.find = ""
-	gps.findall = false
-	gps.satenum = 0
-	gps.locationsatenum = 0
-	gps.sn,gps.sn1 = 0,0
-	gps.sates = ""
-	gps.filterbgn = nil
-	gps.filtertime = 2
-	gps.fix = 0
-	gps.ds3d = 0
-	gps.timezone = nil
-	gps.spdtyp = GPS_KILOMETER_SPD	
-	gps.opentags = {}
-	gps.isagpspwronupd = (apgspwronupd == nil) and true or apgspwronupd
-
-	c.gps = 0
-	c.hasgps = 0
-	c.gpsfind = 0
-	c.gpsprint = 0
-	c.fixbgn = 0
-	c.fixitv = 0
-
-	gps.io = ionum
-	gps.edge = true
-
-	gps.period = 1000
-	gps.uartid = (id or 2)
-	gps.baud = (baud or 115200)
-	gps.databits = (databits or 8)
-	gps.parity = (parity or uart.PAR_NONE)
-	gps.stopbits = (stopbits or uart.STOP_1)
-
-	if ionum then
-		pio.pin.setdir(pio.OUTPUT,ionum)
-	end
-end
-
---[[
-∫Ø ˝√˚£∫setgpsfilter
-π¶ƒ‹  £∫…Ë÷√GPS∂®Œª≥…π¶π˝¬À ±º‰
-≤Œ ˝  £∫
-		secs£∫π˝¬Àµƒ√Î ˝£¨¿˝»Á5£¨±Ì æGPS∂®Œª≥…π¶∫Û£¨»”µÙ«∞5√Îµƒ∂®Œª–≈œ¢
-∑µªÿ÷µ£∫Œﬁ
-]]
-function setgpsfilter(secs)
-	if secs >= 0 then
-		gps.filtertime = secs
-	end
-end
-
---[[
-∫Ø ˝√˚£∫settimezone
-π¶ƒ‹  £∫…Ë÷√»Ìº˛œµÕ≥µƒ ±«¯£¨µ˜”√¥ÀΩ”ø⁄∫Û£¨GPSªÒ»°µΩ ±º‰∫Û£¨ª·…Ë÷√∂‘”¶ ±«¯µƒœµÕ≥ ±º‰
-≤Œ ˝  £∫
-		zone£∫ƒø«∞÷ß≥÷GPS_GREENWICH_TIME°¢GPS_BEIJING_TIME°¢GPS_VIETNAM_TIME
-∑µªÿ÷µ£∫Œﬁ
-]]
-function settimezone(zone)
-	gps.timezone = zone
-end
-
---[[
-∫Ø ˝√˚£∫setspdtyp
-π¶ƒ‹  £∫…Ë÷√ÀŸ∂»¿‡–Õ
-≤Œ ˝  £∫
-		typ£∫ƒø«∞÷ß≥÷GPS_KNOT_SPD°¢GPS_KILOMETER_SPD
-∑µªÿ÷µ£∫Œﬁ
-]]
-function setspdtyp(typ)
-	gps.spdtyp = typ
-end
-
---[[
-∫Ø ˝√˚£∫setfixmode
-π¶ƒ‹  £∫…Ë÷√∂®Œªƒ£ Ω
-≤Œ ˝  £∫
-		md£∫∂®Œªƒ£ Ω
-			0£∫GPS+BD
-			1£∫ΩˆGPS
-			2£∫ΩˆBD
-∑µªÿ÷µ£∫Œﬁ
-]]
-function setfixmode(md)
-	gps.fixmode = md or 0
-	if isopen() then
-		print("setfixmode",gps.fixmode)
-		if gps.fixmode==0 then
-			writecmd("$PGKC115,1,0,1,0*")
-		elseif gps.fixmode==1 then
-			writecmd("$PGKC115,1,0,0,0*")
-		elseif gps.fixmode==2 then
-			writecmd("$PGKC115,0,0,1,0*")
-		end
-	end
-end
-
---[[
-∫Ø ˝√˚£∫setnemamode
-π¶ƒ‹  £∫…Ë÷√NEMA ˝æ›µƒ¥¶¿Ìƒ£ Ω
-≤Œ ˝  £∫
-		md£∫¥¶¿Ìƒ£ Ω
-			0£∫Ωˆgps.luaƒ⁄≤ø¥¶¿Ì
-			1£∫gps.luaƒ⁄≤ø≤ª¥¶¿Ì£¨∞—nema ˝æ›Õ®π˝ªÿµ˜∫Ø ˝cbÃ·π©∏¯Õ‚≤ø≥Ã–Ú¥¶¿Ì
-			2£∫gps.lua∫ÕÕ‚≤ø≥Ã–Ú∂º¥¶¿Ì
-		cb£∫Õ‚≤ø≥Ã–Ú¥¶¿ÌNEMA ˝æ›µƒªÿµ˜∫Ø ˝
-∑µªÿ÷µ£∫Œﬁ
-]]
-function setnemamode(md,cb)
-	gps.nemamode = md or 0
-	gps.nemacb = cb	
-end
-
-function closeuart()
-	print("gps closeuart")
-	uart.close(gps.uartid)
-	sys.timer_stop(read)
-end
-
-function openuart()
-	print("gps openuart")
-	uart.setup(gps.uartid,gps.baud,gps.databits,gps.parity,gps.stopbits,1)
-	sys.timer_start(read,gps.period)
-end
-
-function getutctime()
-	return gps.utctime
-end
-
-function getfixitv()
-	return isfix() and c.fixitv or 0
-end
-
-function isagpspwronupd()
-	return (gps.isagpspwronupd == nil) and true or gps.isagpspwronupd
-end
-
-
---°∞GPS”¶”√°±£∫÷∏µƒ « π”√GPSπ¶ƒ‹µƒ“ª∏ˆ”¶”√
---¿˝»Á£¨ºŸ…Ë”–»Áœ¬3÷÷–Ë«Û£¨“™¥Úø™GPS£¨‘Ú“ªπ≤”–3∏ˆ°∞GPS”¶”√°±£∫
---°∞GPS”¶”√1°±£∫√ø∏Ù1∑÷÷”¥Úø™“ª¥ŒGPS
---°∞GPS”¶”√2°±£∫…Ë±∏∑¢…˙’∂Ø ±¥Úø™GPS
---°∞GPS”¶”√3°±£∫ ’µΩ“ªÃıÃÿ ‚∂Ã–≈ ±¥Úø™GPS
---÷ª”–À˘”–°∞GPS”¶”√°±∂ºπÿ±’¡À£¨≤≈ª·»•’Ê’˝πÿ±’GPS
-
---[[
-√ø∏ˆ°∞GPS”¶”√°±¥Úø™ªÚ’ﬂπÿ±’GPS ±£¨◊Ó∂‡”–4∏ˆ≤Œ ˝£¨∆‰÷– GPSπ§◊˜ƒ£ Ω∫Õ°∞GPS”¶”√°±±Íº« π≤Õ¨æˆ∂®¡À“ª∏ˆŒ®“ªµƒ°∞GPS”¶”√°±£∫
-1°¢GPSπ§◊˜ƒ£ Ω(±ÿ—°)
-2°¢°∞GPS”¶”√°±±Íº«(±ÿ—°)
-3°¢GPSø™∆Ù◊Ó¥Û ±≥§[ø…—°]
-4°¢ªÿµ˜∫Ø ˝[ø…—°]
-¿˝»Ágps.open(gps.TIMERORSUC,{cause="TEST",val=120,cb=testgpscb})
-gps.TIMERORSUCŒ™GPSπ§◊˜ƒ£ Ω£¨"TEST"Œ™°∞GPS”¶”√°±±Íº«£¨120√ÎŒ™GPSø™∆Ù◊Ó¥Û ±≥§£¨testgpscbŒ™ªÿµ˜∫Ø ˝
-]]
-
-
---[[
-GPSπ§◊˜ƒ£ Ω£¨π≤”–»Áœ¬3÷÷
-1°¢DEFAULT
-   (1)°¢¥Úø™∫Û£¨GPS∂®Œª≥…π¶ ±£¨»Áπ˚”–ªÿµ˜∫Ø ˝£¨ª·µ˜”√ªÿµ˜∫Ø ˝
-   (2)°¢ π”√¥Àπ§◊˜ƒ£ Ωµ˜”√gps.open¥Úø™µƒ°∞GPS”¶”√°±£¨±ÿ–Îµ˜”√gps.close≤≈ƒ‹πÿ±’
-2°¢TIMERORSUC
-   (1)°¢¥Úø™∫Û£¨»Áπ˚‘⁄GPSø™∆Ù◊Ó¥Û ±≥§µΩ¥Ô ±£¨√ª”–∂®Œª≥…π¶£¨»Áπ˚”–ªÿµ˜∫Ø ˝£¨ª·µ˜”√ªÿµ˜∫Ø ˝£¨»ª∫Û◊‘∂Øπÿ±’¥À°∞GPS”¶”√°±
-   (2)°¢¥Úø™∫Û£¨»Áπ˚‘⁄GPSø™∆Ù◊Ó¥Û ±≥§ƒ⁄£¨∂®Œª≥…π¶£¨»Áπ˚”–ªÿµ˜∫Ø ˝£¨ª·µ˜”√ªÿµ˜∫Ø ˝£¨»ª∫Û◊‘∂Øπÿ±’¥À°∞GPS”¶”√°±
-   (3)°¢¥Úø™∫Û£¨‘⁄◊‘∂Øπÿ±’¥À°∞GPS”¶”√°±«∞£¨ø…“‘µ˜”√gps.close÷˜∂Øπÿ±’¥À°∞GPS”¶”√°±£¨÷˜∂Øπÿ±’ ±£¨º¥ π”–ªÿµ˜∫Ø ˝£¨“≤≤ªª·µ˜”√ªÿµ˜∫Ø ˝
-3°¢TIMER
-   (1)°¢¥Úø™∫Û£¨‘⁄GPSø™∆Ù◊Ó¥Û ±≥§ ±º‰µΩ¥Ô ±£¨Œﬁ¬€ «∑Ò∂®Œª≥…π¶£¨»Áπ˚”–ªÿµ˜∫Ø ˝£¨ª·µ˜”√ªÿµ˜∫Ø ˝£¨»ª∫Û◊‘∂Øπÿ±’¥À°∞GPS”¶”√°±
-   (2)°¢¥Úø™∫Û£¨‘⁄◊‘∂Øπÿ±’¥À°∞GPS”¶”√°±«∞£¨ø…“‘µ˜”√gps.close÷˜∂Øπÿ±’¥À°∞GPS”¶”√°±£¨÷˜∂Øπÿ±’ ±£¨º¥ π”–ªÿµ˜∫Ø ˝£¨“≤≤ªª·µ˜”√ªÿµ˜∫Ø ˝
-]]
-DEFAULT,TIMERORSUC,TIMER = 0,1,2
-
---°∞GPS”¶”√°±±Ì
-local tlist = {}
-
---[[
-∫Ø ˝√˚£∫print
-π¶ƒ‹  £∫¥Ú”°Ω”ø⁄£¨¥ÀŒƒº˛÷–µƒÀ˘”–¥Ú”°∂ºª·º”…œgps«∞◊∫
-≤Œ ˝  £∫Œﬁ
-∑µªÿ÷µ£∫Œﬁ
-]]
-local function print(...)
-	base.print("gps",...)
-end
-
---[[
-∫Ø ˝√˚£∫delitem
-π¶ƒ‹  £∫¥”°∞GPS”¶”√°±±Ì÷–…æ≥˝“ªœÓ°∞GPS”¶”√°±£¨≤¢≤ª «’Ê’˝µƒ…æ≥˝£¨÷ª «…Ë÷√“ª∏ˆŒﬁ–ß±Í÷æ
-≤Œ ˝  £∫
-		mode£∫GPSπ§◊˜ƒ£ Ω
-		para£∫
-			para.cause£∫°∞GPS”¶”√°±±Íº«
-			para.val£∫GPSø™∆Ù◊Ó¥Û ±≥§
-			para.cb£∫ªÿµ˜∫Ø ˝
-∑µªÿ÷µ£∫Œﬁ
-]]
-local function delitem(mode,para)
-	local i
-	for i=1,#tlist do
-		--±Í÷æ”––ß ≤¢«“ GPSπ§◊˜ƒ£ Ωœ‡Õ¨ ≤¢«“ °∞GPS”¶”√°±±Íº«œ‡Õ¨
-		if tlist[i].flag and tlist[i].mode == mode and tlist[i].para.cause == para.cause then
-			--…Ë÷√Œﬁ–ß±Í÷æ
-			tlist[i].flag,tlist[i].delay = false
-			break
-		end
-	end
-end
-
---[[
-∫Ø ˝√˚£∫additem
-π¶ƒ‹  £∫–¬‘ˆ“ªœÓ°∞GPS”¶”√°±µΩ°∞GPS”¶”√°±±Ì
-≤Œ ˝  £∫
-		mode£∫GPSπ§◊˜ƒ£ Ω
-		para£∫
-			para.cause£∫°∞GPS”¶”√°±±Íº«
-			para.val£∫GPSø™∆Ù◊Ó¥Û ±≥§
-			para.cb£∫ªÿµ˜∫Ø ˝
-∑µªÿ÷µ£∫Œﬁ
-]]
-local function additem(mode,para)
-	--…æ≥˝œ‡Õ¨µƒ°∞GPS”¶”√°±
-	delitem(mode,para)
-	local item,i,fnd = {flag = true, mode = mode, para = para}
-	--»Áπ˚ «TIMERORSUCªÚ’ﬂTIMERƒ£ Ω£¨≥ı ºªØGPSπ§◊˜ £”‡ ±º‰
-	if mode == TIMERORSUC or mode == TIMER then item.para.remain = para.val end
-	for i=1,#tlist do
-		--»Áπ˚¥Ê‘⁄Œﬁ–ßµƒ°∞GPS”¶”√°±œÓ£¨÷±Ω” π”√¥ÀŒª÷√
-		if not tlist[i].flag then
-			tlist[i] = item
-			fnd = true
-			break
-		end
-	end
-	--–¬‘ˆ“ªœÓ
-	if not fnd then table.insert(tlist,item) end
-end
-
-local function isexisttimeritem()
-	local i
-	for i=1,#tlist do
-		if tlist[i].flag and (tlist[i].mode == TIMERORSUC or tlist[i].mode == TIMER or tlist[i].para.delay) then return true end
-	end
-end
-
-local function timerfunc()
-	local i
-	for i=1,#tlist do
-		print("timerfunc@"..i,tlist[i].flag,tlist[i].mode,tlist[i].para.cause,tlist[i].para.val,tlist[i].para.remain,tlist[i].para.delay)
-		if tlist[i].flag then
-			local rmn,dly,md,cb = tlist[i].para.remain,tlist[i].para.delay,tlist[i].mode,tlist[i].para.cb
-			if rmn and rmn > 0 then
-				tlist[i].para.remain = rmn - 1
-			end
-			if dly and dly > 0 then
-				tlist[i].para.delay = dly - 1
-			end
-			
-			rmn = tlist[i].para.remain
-			if isfix() and md == TIMER and rmn == 0 and not tlist[i].para.delay then
-				tlist[i].para.delay = 1
-			end
-			
-			dly = tlist[i].para.delay
-			if isfix() then
-				if dly and dly == 0 then
-					if cb then cb(tlist[i].para.cause) end
-					if md == DEFAULT then
-						tlist[i].para.delay = nil
-					else
-						close(md,tlist[i].para)
-					end
-				end
-			else
-				if rmn and rmn == 0 then
-					if cb then cb(tlist[i].para.cause) end
-					close(md,tlist[i].para)
-				end
-			end			
-		end
-	end
-	if isexisttimeritem() then sys.timer_start(timerfunc,1000) end
-end
-
---[[
-∫Ø ˝√˚£∫gpsstatind
-π¶ƒ‹  £∫¥¶¿ÌGPS∂®Œª≥…π¶µƒœ˚œ¢
-≤Œ ˝  £∫
-		id£∫GPSœ˚œ¢id
-		evt£∫GPSœ˚œ¢¿‡–Õ
-∑µªÿ÷µ£∫Œﬁ
-]]
-local function gpsstatind(id,evt)
-	--∂®Œª≥…π¶µƒœ˚œ¢
-	if evt == GPS_LOCATION_SUC_EVT then
-		local i
-		for i=1,#tlist do
-			print("gpsstatind@"..i,tlist[i].flag,tlist[i].mode,tlist[i].para.cause,tlist[i].para.val,tlist[i].para.remain,tlist[i].para.delay,tlist[i].para.cb)
-			if tlist[i].flag then
-				if tlist[i].mode ~= TIMER then
-					tlist[i].para.delay = 1
-					if tlist[i].mode == DEFAULT then
-						if isexisttimeritem() then sys.timer_start(timerfunc,1000) end
-					end
-				end				
-			end			
-		end
-	end
-	return true
-end
-
---[[
-∫Ø ˝√˚£∫forceclose
-π¶ƒ‹  £∫«ø÷∆πÿ±’À˘”–°∞GPS”¶”√°±
-≤Œ ˝  £∫Œﬁ
-∑µªÿ÷µ£∫Œﬁ
-]]
-function forceclose()
-	local i
-	for i=1,#tlist do
-		if tlist[i].flag and tlist[i].para.cb then tlist[i].para.cb(tlist[i].para.cause) end
-		close(tlist[i].mode,tlist[i].para)
-	end
-end
-
---[[
-∫Ø ˝√˚£∫close
-π¶ƒ‹  £∫πÿ±’“ª∏ˆ°∞GPS”¶”√°±
-≤Œ ˝  £∫
-		mode£∫GPSπ§◊˜ƒ£ Ω
-		para£∫
-			para.cause£∫°∞GPS”¶”√°±±Íº«
-			para.val£∫GPSø™∆Ù◊Ó¥Û ±≥§
-			para.cb£∫ªÿµ˜∫Ø ˝
-∑µªÿ÷µ£∫Œﬁ
-]]
-function close(mode,para)
-	assert((para and type(para) == "table" and para.cause and type(para.cause) == "string"),"gps.close para invalid")
-	print("ctl close",mode,para.cause,para.val,para.cb)
-	--…æ≥˝¥À°∞GPS”¶”√°±
-	delitem(mode,para)
-	local valid,i
-	for i=1,#tlist do
-		if tlist[i].flag then
-			valid = true
-		end		
-	end
-	--»Áπ˚√ª”–“ª∏ˆ°∞GPS”¶”√°±”––ß£¨‘Úπÿ±’GPS
-	if not valid then closegps("gps") end
-end
-
---[[
-∫Ø ˝√˚£∫open
-π¶ƒ‹  £∫¥Úø™“ª∏ˆ°∞GPS”¶”√°±
-≤Œ ˝  £∫
-		mode£∫GPSπ§◊˜ƒ£ Ω
-		para£∫
-			para.cause£∫°∞GPS”¶”√°±±Íº«
-			para.val£∫GPSø™∆Ù◊Ó¥Û ±≥§
-			para.cb£∫ªÿµ˜∫Ø ˝
-∑µªÿ÷µ£∫Œﬁ
-]]
+--- ÊâìÂºÄ‰∏Ä‰∏™‚ÄúGPSÂ∫îÁî®‚Äù
+-- ‚ÄúGPSÂ∫îÁî®‚ÄùÔºöÊåáÁöÑÊòØ‰ΩøÁî®GPSÂäüËÉΩÁöÑ‰∏Ä‰∏™Â∫îÁî®
+-- ‰æãÂ¶ÇÔºåÂÅáËÆæÊúâÂ¶Ç‰∏ã3ÁßçÈúÄÊ±ÇÔºåË¶ÅÊâìÂºÄGPSÔºåÂàô‰∏ÄÂÖ±Êúâ3‰∏™‚ÄúGPSÂ∫îÁî®‚ÄùÔºö
+-- ‚ÄúGPSÂ∫îÁî®1‚ÄùÔºöÊØèÈöî1ÂàÜÈíüÊâìÂºÄ‰∏ÄÊ¨°GPS
+-- ‚ÄúGPSÂ∫îÁî®2‚ÄùÔºöËÆæÂ§áÂèëÁîüÈúáÂä®Êó∂ÊâìÂºÄGPS
+-- ‚ÄúGPSÂ∫îÁî®3‚ÄùÔºöÊî∂Âà∞‰∏ÄÊù°ÁâπÊÆäÁü≠‰ø°Êó∂ÊâìÂºÄGPS
+-- Âè™ÊúâÊâÄÊúâ‚ÄúGPSÂ∫îÁî®‚ÄùÈÉΩÂÖ≥Èó≠‰∫ÜÔºåÊâç‰ºöÂéªÁúüÊ≠£ÂÖ≥Èó≠GPS
+-- ÊØè‰∏™‚ÄúGPSÂ∫îÁî®‚ÄùÊâìÂºÄÊàñËÄÖÂÖ≥Èó≠GPSÊó∂ÔºåÊúÄÂ§öÊúâ4‰∏™ÂèÇÊï∞ÔºåÂÖ∂‰∏≠ GPSÂ∫îÁî®Ê®°ÂºèÂíåGPSÂ∫îÁî®Ê†áËÆ∞ ÂÖ±ÂêåÂÜ≥ÂÆö‰∫Ü‰∏Ä‰∏™ÂîØ‰∏ÄÁöÑ‚ÄúGPSÂ∫îÁî®‚ÄùÔºö
+-- 1„ÄÅGPSÂ∫îÁî®Ê®°Âºè(ÂøÖÈÄâ)
+-- 2„ÄÅGPSÂ∫îÁî®Ê†áËÆ∞(ÂøÖÈÄâ)
+-- 3„ÄÅGPSÂºÄÂêØÊúÄÂ§ßÊó∂Èïø[ÂèØÈÄâ]
+-- 4„ÄÅÂõûË∞ÉÂáΩÊï∞[ÂèØÈÄâ]
+-- ‰æãÂ¶Çgps.open(gps.TIMERORSUC,{tag="TEST",val=120,cb=testGpsCb})
+-- gps.TIMERORSUC‰∏∫GPSÂ∫îÁî®Ê®°ÂºèÔºå"TEST"‰∏∫GPSÂ∫îÁî®Ê†áËÆ∞Ôºå120Áßí‰∏∫GPSÂºÄÂêØÊúÄÂ§ßÊó∂ÈïøÔºåtestGpsCb‰∏∫ÂõûË∞ÉÂáΩÊï∞
+-- @number modeÔºåGPSÂ∫îÁî®Ê®°ÂºèÔºåÊîØÊåÅgps.DEFAULTÔºågps.TIMERORSUCÔºågps.TIMER‰∏âÁßç
+-- @param paraÔºåtableÁ±ªÂûãÔºåGPSÂ∫îÁî®ÂèÇÊï∞
+--               para.tagÔºöstringÁ±ªÂûãÔºåGPSÂ∫îÁî®Ê†áËÆ∞
+--               para.valÔºönumberÁ±ªÂûãÔºåGPSÂ∫îÁî®ÂºÄÂêØÊúÄÂ§ßÊó∂ÈïøÔºåmodeÂèÇÊï∞‰∏∫gps.TIMERORSUCÊàñËÄÖgps.TIMERÊó∂ÔºåÊ≠§ÂÄºÊâçÊúâÊÑè‰πâ
+--               para.cbÔºöGPSÂ∫îÁî®ÁªìÊùüÊó∂ÁöÑÂõûË∞ÉÂáΩÊï∞ÔºåÂõûË∞ÉÂáΩÊï∞ÁöÑË∞ÉÁî®ÂΩ¢Âºè‰∏∫para.cb(para.tag)
+-- @return nil
+-- @usage gps.open(gps.DEFAULT,{tag="TEST1",cb=test1Cb})
+-- @usage gps.open(gps.TIMERORSUC,{tag="TEST2",val=60,cb=test2Cb})
+-- @usage gps.open(gps.TIMER,{tag="TEST3",val=120,cb=test3Cb})
+-- @see DEFAULT,TIMERORSUC,TIMER
 function open(mode,para)
-	assert((para and type(para) == "table" and para.cause and type(para.cause) == "string"),"gps.open para invalid")
-	print("ctl open",mode,para.cause,para.val,para.cb)
-	--»Áπ˚GPS∂®Œª≥…π¶
-	if isfix() then
-		if mode ~= TIMER then
-			--÷¥––ªÿµ˜∫Ø ˝
-			if para.cb then para.cb(para.cause) end
-			if mode == TIMERORSUC then return end			
-		end
-	end
-	additem(mode,para)
-	--’Ê’˝»•¥Úø™GPS
-	opengps("gps")
-	--∆Ù∂Ø1√Îµƒ∂® ±∆˜
-	if isexisttimeritem() and not sys.timer_is_active(timerfunc) then
-		sys.timer_start(timerfunc,1000)
-	end
+    assert((para and type(para) == "table" and para.tag and type(para.tag) == "string"),"gps.open para invalid")
+    log.info("gps.open",mode,para.tag,para.val,para.cb)
+    --Â¶ÇÊûúGPSÂÆö‰ΩçÊàêÂäü
+    if isFix() then
+        if mode~=TIMER then
+            --ÊâßË°åÂõûË∞ÉÂáΩÊï∞
+            if para.cb then para.cb(para.tag) end
+            if mode==TIMERORSUC then return end
+        end
+    end
+    addItem(mode,para)
+    --ÁúüÊ≠£ÂéªÊâìÂºÄGPS
+    _open()
+    --ÂêØÂä®1ÁßíÁöÑÂÆöÊó∂Âô®
+    if existTimerItem() and not sys.timerIsActive(timerFnc) then
+        sys.timerStart(timerFnc,1000)
+    end
 end
 
---[[
-∫Ø ˝√˚£∫isactive
-π¶ƒ‹  £∫≈–∂œ“ª∏ˆ°∞GPS”¶”√°± «∑Ò¥¶”⁄º§ªÓ◊¥Ã¨
-≤Œ ˝  £∫
-		mode£∫GPSπ§◊˜ƒ£ Ω
-		para£∫
-			para.cause£∫°∞GPS”¶”√°±±Íº«
-			para.val£∫GPSø™∆Ù◊Ó¥Û ±≥§
-			para.cb£∫ªÿµ˜∫Ø ˝
-∑µªÿ÷µ£∫º§ªÓ∑µªÿtrue£¨∑Ò‘Ú∑µªÿnil
-]]
-function isactive(mode,para)
-	assert((para and type(para) == "table" and para.cause and type(para.cause) == "string"),"gps.isactive para invalid")
-	local i
-	for i=1,#tlist do
-		if tlist[i].flag and tlist[i].mode == mode and tlist[i].para.cause == para.cause then
-			return true
-		end
-	end
+--- ÂÖ≥Èó≠‰∏Ä‰∏™‚ÄúGPSÂ∫îÁî®‚Äù
+-- Âè™ÊòØ‰ªéÈÄªËæë‰∏äÂÖ≥Èó≠‰∏Ä‰∏™GPSÂ∫îÁî®ÔºåÂπ∂‰∏ç‰∏ÄÂÆöÁúüÊ≠£ÂÖ≥Èó≠GPSÔºåÊòØÊúâÊâÄÊúâÁöÑGPSÂ∫îÁî®ÈÉΩÂ§Ñ‰∫éÂÖ≥Èó≠Áä∂ÊÄÅÔºåÊâçÂõûÂéªÁúüÊ≠£ÂÖ≥Èó≠GPS
+-- @number modeÔºåGPSÂ∫îÁî®Ê®°ÂºèÔºåÊîØÊåÅgps.DEFAULTÔºågps.TIMERORSUCÔºågps.TIMER‰∏âÁßç
+-- @param paraÔºåtableÁ±ªÂûãÔºåGPSÂ∫îÁî®ÂèÇÊï∞
+--               para.tagÔºöstringÁ±ªÂûãÔºåGPSÂ∫îÁî®Ê†áËÆ∞
+--               para.valÔºönumberÁ±ªÂûãÔºåGPSÂ∫îÁî®ÂºÄÂêØÊúÄÂ§ßÊó∂ÈïøÔºåmodeÂèÇÊï∞‰∏∫gps.TIMERORSUCÊàñËÄÖgps.TIMERÊó∂ÔºåÊ≠§ÂÄºÊâçÊúâÊÑè‰πâÔºõ‰ΩøÁî®closeÊé•Âè£Êó∂Ôºå‰∏çÈúÄË¶Å‰º†ÂÖ•Ê≠§ÂèÇÊï∞
+--               para.cbÔºöGPSÂ∫îÁî®ÁªìÊùüÊó∂ÁöÑÂõûË∞ÉÂáΩÊï∞ÔºåÂõûË∞ÉÂáΩÊï∞ÁöÑË∞ÉÁî®ÂΩ¢Âºè‰∏∫para.cb(para.tag)Ôºõ‰ΩøÁî®closeÊé•Âè£Êó∂Ôºå‰∏çÈúÄË¶Å‰º†ÂÖ•Ê≠§ÂèÇÊï∞
+-- @return nil
+-- @usage GPSÂ∫îÁî®Ê®°ÂºèÂíåGPSÂ∫îÁî®Ê†áËÆ∞ÂîØ‰∏ÄÁ°ÆÂÆö‰∏Ä‰∏™‚ÄúGPSÂ∫îÁî®‚ÄùÔºåË∞ÉÁî®Êú¨Êé•Âè£ÂÖ≥Èó≠Êó∂ÔºåmodeÂíåpara.tagË¶ÅÂíågps.openÊâìÂºÄ‰∏Ä‰∏™‚ÄúGPSÂ∫îÁî®‚ÄùÊó∂‰º†ÂÖ•ÁöÑmodeÂíåpara.tag‰øùÊåÅ‰∏ÄËá¥
+-- @usage gps.close(gps.DEFAULT,{tag="TEST1"})
+-- @usage gps.close(gps.TIMERORSUC,{tag="TEST2"})
+-- @usage gps.close(gps.TIMER,{tag="TEST3"})
+-- @see open,DEFAULT,TIMERORSUC,TIMER
+function close(mode,para)
+    assert((para and type(para)=="table" and para.tag and type(para.tag)=="string"),"gps.close para invalid")
+    log.info("gps.close",mode,para.tag,para.val,para.cb)
+    --Âà†Èô§Ê≠§‚ÄúGPSÂ∫îÁî®‚Äù
+    delItem(mode,para)
+    local valid,i
+    for i=1,#tList do
+        if tList[i].flag then
+            valid = true
+        end
+    end
+    --Â¶ÇÊûúÊ≤°Êúâ‰∏Ä‰∏™‚ÄúGPSÂ∫îÁî®‚ÄùÊúâÊïàÔºåÂàôÂÖ≥Èó≠GPS
+    if not valid then _close() end
 end
 
-sys.regapp(gpsstatind,GPS_STATE_IND)
---Œ™GPSÃ·π©32K ±÷”
-rtos.sys32k_clk_out(1)
+--- ÂÖ≥Èó≠ÊâÄÊúâ‚ÄúGPSÂ∫îÁî®‚Äù
+-- @return nil
+-- @usage gps.closeAll()
+-- @see open,DEFAULT,TIMERORSUC,TIMER
+function closeAll()
+    for i=1,#tList do
+        if tList[i].flag and tList[i].para.cb then tList[i].para.cb(tList[i].para.tag) end
+        close(tList[i].mode,tList[i].para)
+    end
+end
+
+--- Âà§Êñ≠‰∏Ä‰∏™‚ÄúGPSÂ∫îÁî®‚ÄùÊòØÂê¶Â§Ñ‰∫éÊøÄÊ¥ªÁä∂ÊÄÅ
+-- @number modeÔºåGPSÂ∫îÁî®Ê®°ÂºèÔºåÊîØÊåÅgps.DEFAULTÔºågps.TIMERORSUCÔºågps.TIMER‰∏âÁßç
+-- @param paraÔºåtableÁ±ªÂûãÔºåGPSÂ∫îÁî®ÂèÇÊï∞
+--               para.tagÔºöstringÁ±ªÂûãÔºåGPSÂ∫îÁî®Ê†áËÆ∞
+--               para.valÔºönumberÁ±ªÂûãÔºåGPSÂ∫îÁî®ÂºÄÂêØÊúÄÂ§ßÊó∂ÈïøÔºåmodeÂèÇÊï∞‰∏∫gps.TIMERORSUCÊàñËÄÖgps.TIMERÊó∂ÔºåÊ≠§ÂÄºÊâçÊúâÊÑè‰πâÔºõ‰ΩøÁî®isActiveÊé•Âè£Êó∂Ôºå‰∏çÈúÄË¶Å‰º†ÂÖ•Ê≠§ÂèÇÊï∞
+--               para.cbÔºöGPSÂ∫îÁî®ÁªìÊùüÊó∂ÁöÑÂõûË∞ÉÂáΩÊï∞ÔºåÂõûË∞ÉÂáΩÊï∞ÁöÑË∞ÉÁî®ÂΩ¢Âºè‰∏∫para.cb(para.tag)Ôºõ‰ΩøÁî®isActiveÊé•Âè£Êó∂Ôºå‰∏çÈúÄË¶Å‰º†ÂÖ•Ê≠§ÂèÇÊï∞
+-- @return bool resultÔºåÂ§Ñ‰∫éÊøÄÊ¥ªÁä∂ÊÄÅËøîÂõûtrueÔºåÂê¶ÂàôËøîÂõûnil
+-- @usage GPSÂ∫îÁî®Ê®°ÂºèÂíåGPSÂ∫îÁî®Ê†áËÆ∞ÂîØ‰∏ÄÁ°ÆÂÆö‰∏Ä‰∏™‚ÄúGPSÂ∫îÁî®‚ÄùÔºåË∞ÉÁî®Êú¨Êé•Âè£Êü•ËØ¢Áä∂ÊÄÅÊó∂ÔºåmodeÂíåpara.tagË¶ÅÂíågps.openÊâìÂºÄ‰∏Ä‰∏™‚ÄúGPSÂ∫îÁî®‚ÄùÊó∂‰º†ÂÖ•ÁöÑmodeÂíåpara.tag‰øùÊåÅ‰∏ÄËá¥
+-- @usage gps.isActive(gps.DEFAULT,{tag="TEST1"})
+-- @usage gps.isActive(gps.TIMERORSUC,{tag="TEST2"})
+-- @usage gps.isActive(gps.TIMER,{tag="TEST3"})
+-- @see open,DEFAULT,TIMERORSUC,TIMER
+function isActive(mode,para)
+    assert((para and type(para)=="table" and para.tag and type(para.tag)=="string"),"gps.isActive para invalid")
+    for i=1,#tList do
+        if tList[i].flag and tList[i].mode==mode and tList[i].para.tag==para.tag then return true end
+    end
+end
+
+--- ËÆæÁΩÆGPSÊ®°Âùó‰æõÁîµÊéßÂà∂ÁöÑÂõûË∞ÉÂáΩÊï∞
+-- Â¶ÇÊûú‰ΩøÁî®ÁöÑÊòØAir800ÔºåÊàñËÄÖ‰æõÁîµÊéßÂà∂‰ΩøÁî®ÁöÑÊòØLDO_VCAMÔºåÂàôÊâìÂºÄGPSÂ∫îÁî®Ââç‰∏çÈúÄË¶ÅË∞ÉÁî®Ê≠§Êé•Âè£ËøõË°åËÆæÁΩÆ
+-- Âê¶ÂàôÂú®Ë∞ÉÁî®gps.openÂâçÔºå‰ΩøÁî®Ê≠§Êé•Âè£Ôºå‰º†ÂÖ•Ëá™ÂÆö‰πâÁöÑ‰æõÁîµÊéßÂà∂ÂáΩÊï∞cbFncÔºåGPSÂºÄÂêØÊó∂Ôºågps.luaËá™Âä®ÊâßË°åcbFnc(true)ÔºåGPSÂÖ≥Èó≠Êó∂Ôºågps.luaËá™Âä®ÊâßË°åcbFnc(false)
+-- @param cbFncÔºåfunctionÁ±ªÂûãÔºåÁî®Êà∑Ëá™ÂÆö‰πâÁöÑGPS‰æõÁîµÊéßÂà∂ÂáΩÊï∞
+-- @return nil
+-- @usage gps.setPowerCbFnc(cbFnc)
+function setPowerCbFnc(cbFnc)
+    powerCbFnc = cbFnc
+end
+
+--- ËÆæÁΩÆGPSÊ®°ÂùóÂíåGSMÊ®°Âùó‰πãÈó¥Êï∞ÊçÆÈÄö‰ø°ÁöÑ‰∏≤Âè£ÂèÇÊï∞
+-- Â¶ÇÊûú‰ΩøÁî®ÁöÑÊòØAir800ÔºåÊàñËÄÖ‰ΩøÁî®ÁöÑUART2(Ê≥¢ÁâπÁéá115200ÔºåÊï∞ÊçÆ‰Ωç8ÔºåÊó†Ê£ÄÈ™å‰ΩçÔºåÂÅúÊ≠¢‰Ωç1)ÔºåÂàôÊâìÂºÄGPSÂ∫îÁî®Ââç‰∏çÈúÄË¶ÅË∞ÉÁî®Ê≠§Êé•Âè£ËøõË°åËÆæÁΩÆ
+-- Âê¶ÂàôÂú®Ë∞ÉÁî®gps.openÂâçÔºå‰ΩøÁî®Ê≠§Êé•Âè£Ôºå‰º†ÂÖ•UARTÂèÇÊï∞
+-- @number idÔºåUART IDÔºåÊîØÊåÅ1Âíå2Ôºå1Ë°®Á§∫UART1Ôºå2Ë°®Á§∫UART2
+-- @number baudrateÔºåÊ≥¢ÁâπÁéáÔºåÊîØÊåÅ1200,2400,4800,9600,10400,14400,19200,28800,38400,57600,76800,115200,230400,460800,576000,921600,1152000,4000000
+-- @number databitsÔºåÊï∞ÊçÆ‰ΩçÔºåÊîØÊåÅ7,8
+-- @number parityÔºåÊ†°È™å‰ΩçÔºåÊîØÊåÅuart.PAR_NONE,uart.PAR_EVEN,uart.PAR_ODD
+-- @number stopbitsÔºåÂÅúÊ≠¢‰ΩçÔºåÊîØÊåÅuart.STOP_1,uart.STOP_2
+-- @return nil
+-- @usage gps.setUart(2,115200,8,uart.PAR_NONE,uart.STOP_1)
+function setUart(id,baudrate,databits,parity,stopbits)
+    uartID,uartBaudrate,uartDatabits,uartParity,uartStopbits = id,baudrate,databits,parity,stopbits
+end
+
+--- ËÆæÁΩÆGPSÊ®°ÂùóÊêúÊòüÊ®°Âºè.
+-- Â¶ÇÊûú‰ΩøÁî®ÁöÑÊòØAir800ÊàñËÄÖAir530Ôºå‰∏çË∞ÉÁî®Ê≠§Êé•Âè£ÈÖçÁΩÆÔºåÂàôÈªòËÆ§ÂêåÊó∂ÂºÄÂêØGPSÂíåÂåóÊñóÂÆö‰Ωç
+-- @number gpsÔºåGPSÂÆö‰ΩçÁ≥ªÁªüÔºå1ÊòØÊâìÂºÄÔºå0ÊòØÂÖ≥Èó≠
+-- @number beidouÔºå‰∏≠ÂõΩÂåóÊñóÂÆö‰ΩçÁ≥ªÁªüÔºå1ÊòØÊâìÂºÄÔºå0ÊòØÂÖ≥Èó≠
+-- @number glonassÔºå‰øÑÁΩóÊñØGlonassÂÆö‰ΩçÁ≥ªÁªüÔºå1ÊòØÊâìÂºÄÔºå0ÊòØÂÖ≥Èó≠
+-- @number galieoÔºåÊ¨ßÁõü‰ºΩÂà©Áï•ÂÆö‰ΩçÁ≥ªÁªüÔºå1ÊòØÊâìÂºÄÔºå0ÊòØÂÖ≥Èó≠
+-- @return nil
+-- @usage gps.setAeriaMode(1,1,0,0)
+function setAerialMode(gps,beidou,glonass,galieo)
+    local gps = gps or 0
+    local glonass = glonass or 0
+    local beidou = beidou or 0
+    local galieo = galieo or 0
+    if gps+glonass+beidou+galieo == 0 then gps=1 beidou=1 end
+    local tmpStr = "$PGKC115,"..gps..","..glonass..","..beidou..","..galieo.."*"
+    if tmpStr~=aerialModeStr then
+        aerialModeStr,aerialModeSetted = tmpStr
+    end
+end
+
+
+--- ËÆæÁΩÆNMEAÊï∞ÊçÆÂ§ÑÁêÜÊ®°Âºè.
+-- Â¶ÇÊûú‰∏çË∞ÉÁî®Ê≠§Êé•Âè£ÈÖçÁΩÆÔºåÂàôÈªòËÆ§‰ªÖgps.luaÂÜÖÈÉ®Â§ÑÁêÜNMEAÊï∞ÊçÆ
+-- @number modeÔºåNMEAÊï∞ÊçÆÂ§ÑÁêÜÊ®°ÂºèÔºå0Ë°®Á§∫‰ªÖgps.luaÂÜÖÈÉ®Â§ÑÁêÜÔºå1Ë°®Á§∫‰ªÖÁî®Êà∑Ëá™Â∑±Â§ÑÁêÜÔºå2Ë°®Á§∫gps.luaÂíåÁî®Êà∑ÂêåÊó∂Â§ÑÁêÜ
+-- @param cbFncÔºåfunctionÁ±ªÂûãÔºåÁî®Êà∑Â§ÑÁêÜ‰∏ÄÊù°NMEAÊï∞ÊçÆÁöÑÂõûË∞ÉÂáΩÊï∞Ôºåmode‰∏∫1Âíå2Êó∂ÔºåÊ≠§ÂÄºÊâçÊúâÊÑè‰πâ
+-- @return nil
+-- @usage gps.setNmeaMode(0)
+-- @usage gps.setNmeaMode(1,cbFnc)
+-- @usage gps.setNmeaMode(2,cbFnc)
+function setNmeaMode(mode,cbFnc)
+    nmeaMode,nmeaCbFnc = mode,cbFnc
+end
+
+--- ËÆæÁΩÆGPSÊ®°ÂùóÁöÑËøêË°åÊ®°Âºè.
+-- Â¶ÇÊûú‰∏çË∞ÉÁî®Ê≠§Êé•Âè£ÈÖçÁΩÆÔºåÂàôÈªòËÆ§‰∏∫Ê≠£Â∏∏ËøêË°åÊ®°Âºè
+-- @number modeÔºåËøêË°åÊ®°Âºè
+-- 0ÔºöÊ≠£Â∏∏ËøêË°åÊ®°Âºè
+-- 1ÔºöÂë®ÊúüË∂Ö‰ΩéÂäüËÄóË∑üË∏™Ê®°Âºè
+-- 2ÔºöÂë®Êúü‰ΩéÂäüËÄóÊ®°Âºè
+-- 4ÔºöÁõ¥Êé•ËøõÂÖ•Ë∂Ö‰ΩéÂäüËÄóË∑üË∏™Ê®°Âºè
+-- 8ÔºöËá™Âä®‰ΩéÂäüËÄóÊ®°ÂºèÔºåÂèØ‰ª•ÈÄöËøá‰∏≤Âè£Âî§ÈÜí
+-- 9ÔºöËá™Âä®Ë∂Ö‰ΩéÂäüËÄóË∑üË∏™Ê®°ÂºèÔºåÈúÄË¶Åforce onÊù•Âî§ÈÜí
+-- @number runTmÔºåÂçï‰ΩçÊØ´ÁßíÔºåmode‰∏∫0Êó∂Ë°®Á§∫NEMAÊï∞ÊçÆÁöÑ‰∏äÊä•Èó¥ÈöîÔºåmode‰∏∫1ÊàñËÄÖ2Êó∂Ë°®Á§∫ËøêË°åÊó∂ÈïøÔºåÂÖ∂‰ΩômodeÊó∂Ê≠§ÂÄºÊó†ÊÑè‰πâ
+-- @number sleepTmÔºåÂçï‰ΩçÊØ´ÁßíÔºåmode‰∏∫1ÊàñËÄÖ2Êó∂Ë°®Á§∫ËøêË°åÊó∂ÈïøÔºåÂÖ∂‰ΩômodeÊó∂Ê≠§ÂÄºÊó†ÊÑè‰πâ
+-- @return nil
+-- @usage gps.setRunMode(0,1000)
+-- @usage gps.setRunMode(1,5000,2000)
+function setRunMode(mode,runTm,sleepTm)
+    local rt,st = runTm or "",sleepTm or ""
+    if mode==0 and rt then
+        if rt>10000 then rt=10000 end
+        if rt<200 then rt=200 end
+        nmeaReportStr = "$PGKC101,"..rt.."*"
+    end
+
+    local tmpStr = "$PGKC105,"..mode..((mode==1 or mode==2) and (","..rt..","..st) or "").."*"
+    if tmpStr~=runModeStr then
+        runModeStr,runModeSetted = tmpStr
+    end
+end
+
+--- ËÆæÁΩÆNEMAËØ≠Âè•ÁöÑËæìÂá∫È¢ëÁéá.
+-- @number[opt=1] rmcÔºåÂçï‰ΩçÁßíÔºåRMCËØ≠Âè•ËæìÂá∫È¢ëÁéáÔºåÂèñÂÄºËåÉÂõ¥0Âà∞10‰πãÈó¥ÁöÑÊï¥Êï∞Ôºå0Ë°®Á§∫‰∏çËæìÂá∫
+-- @number[opt=1] ggaÔºåÂçï‰ΩçÁßíÔºåGGAËØ≠Âè•ËæìÂá∫È¢ëÁéáÔºåÂèñÂÄºËåÉÂõ¥0Âà∞10‰πãÈó¥ÁöÑÊï¥Êï∞Ôºå0Ë°®Á§∫‰∏çËæìÂá∫
+-- @number[opt=1] gsaÔºåÂçï‰ΩçÁßíÔºåGSAËØ≠Âè•ËæìÂá∫È¢ëÁéáÔºåÂèñÂÄºËåÉÂõ¥0Âà∞10‰πãÈó¥ÁöÑÊï¥Êï∞Ôºå0Ë°®Á§∫‰∏çËæìÂá∫
+-- @number[opt=1] gsvÔºåÂçï‰ΩçÁßíÔºåGSVËØ≠Âè•ËæìÂá∫È¢ëÁéáÔºåÂèñÂÄºËåÉÂõ¥0Âà∞10‰πãÈó¥ÁöÑÊï¥Êï∞Ôºå0Ë°®Á§∫‰∏çËæìÂá∫
+-- @number[opt=1] vtgÔºåÂçï‰ΩçÁßíÔºåVTGËØ≠Âè•ËæìÂá∫È¢ëÁéáÔºåÂèñÂÄºËåÉÂõ¥0Âà∞10‰πãÈó¥ÁöÑÊï¥Êï∞Ôºå0Ë°®Á§∫‰∏çËæìÂá∫
+-- @number[opt=0] gllÔºåÂçï‰ΩçÁßíÔºåGLLËØ≠Âè•ËæìÂá∫È¢ëÁéáÔºåÂèñÂÄºËåÉÂõ¥0Âà∞10‰πãÈó¥ÁöÑÊï¥Êï∞Ôºå0Ë°®Á§∫‰∏çËæìÂá∫
+-- @return nil
+-- @usage gps.setNemaReportFreq(5,0,0,0,0,0)
+function setNemaReportFreq(rmc,gga,gsa,gsv,vtg,gll)
+    local tmpStr = "$PGKC242,"..(gll or 0)..","..(rmc or 1)..","..(vtg or 1)..","..(gga or 1)..","..(gsa or 1)..","..(gsv or 1)..",0,0,0,0,0,0,0,0,0,0,0,0,0".."*"
+    if tmpStr~=nmeaReportFreqStr then
+        nmeaReportFreqStr,nmeaReportFreqSetted = tmpStr
+    end
+end
+
+--- ËÆæÁΩÆGPSÂÆö‰ΩçÊàêÂäüÂêéÁªèÁ∫¨Â∫¶ÁöÑËøáÊª§Êó∂Èó¥.
+-- @number[opt=0] secondsÔºåÂçï‰ΩçÁßíÔºåGPSÂÆö‰ΩçÊàêÂäüÂêéÔºå‰∏¢ÂºÉÂâçsecondsÁßíÁöÑ‰ΩçÁΩÆ‰ø°ÊÅØ
+-- @return nil
+-- @usage gps.setLocationFilter(2)
+function setLocationFilter(seconds)
+    filterSeconds = seconds or 0
+end
+
+function setFastFix(lat,lng,tm)
+    local t = tm.year..","..tm.month..","..tm.day..","..tm.hour..","..tm.min..","..tm.sec.."*"
+    log.info("gps.setFastFix",lat,lng,t)
+    writeCmd("$PGKC634,"..t)
+    writeCmd("$PGKC635,"..lat..","..lng..",0,"..t)
+end
+
+--- Ëé∑ÂèñGPSÊ®°ÂùóÊòØÂê¶Â§Ñ‰∫éÂºÄÂêØÁä∂ÊÄÅ
+-- @return bool resultÔºåtrueË°®Á§∫ÂºÄÂêØÁä∂ÊÄÅÔºåfalseÊàñËÄÖnilË°®Á§∫ÂÖ≥Èó≠Áä∂ÊÄÅ
+-- @usage gps.isOpen()
+function isOpen()
+    return openFlag
+end
+
+--- Ëé∑ÂèñGPSÊ®°ÂùóÊòØÂê¶ÂÆö‰ΩçÊàêÂäü
+-- @return bool resultÔºåtrueË°®Á§∫ÂÆö‰ΩçÊàêÂäüÔºåfalseÊàñËÄÖnilË°®Á§∫ÂÆö‰ΩçÂ§±Ë¥•
+-- @usage gps.isFix()
+function isFix()
+    return fixFlag
+end
+
+-- Â∫¶ÂàÜÊ†ºÂºèËΩ¨Êç¢‰∏∫Â∫¶Ê†ºÂºè
+-- @string inStrÔºåÂ∫¶ÂàÜÊ†ºÂºèÁöÑ‰ΩçÁΩÆ
+-- @return stringÔºåÂ∫¶Ê†ºÂºèÁöÑ‰ΩçÁΩÆ
+-- @usage degreeMinuteToDegree("3114.50931")--->"31.2418218"Ôºå31Â∫¶14.50931ÂàÜËΩ¨Êç¢‰∏∫31.2418218Â∫¶
+-- @usage degreeMinuteToDegree("12128.44954")--->"121.4741590"Ôºå121Â∫¶28.44954ÂàÜËΩ¨Êç¢‰∏∫121.4741590Â∫¶
+local function degreeMinuteToDegree(inStr)
+    local integer,fraction = smatch(inStr,"(%d+)%.(%d+)")
+    if integer and fraction then
+        local intLen = slen(integer)
+        if intLen~=4 and intLen~=5 then log.error("gps.degreeMinuteToDegree integer error",inStr) return "" end
+        if slen(fraction)<5 then fraction = fraction..srep("0",5-slen(fraction)) end
+        fraction = ssub(fraction,1,5)
+        local temp = tonumber(ssub(integer,intLen-1,intLen)..fraction)*10
+        fraction = tostring((temp-(temp%6))/6)
+        local fracLen = slen(fraction)
+        if fracLen>7 then
+            fraction = ssub(fraction,1,7)
+        elseif fracLen<7 then
+            fraction = srep("0",7-fracLen)..fraction
+        end
+        return ssub(integer,1,intLen-2).."."..fraction
+    end
+
+    return ""
+end
+
+--- Ëé∑ÂèñÂ∫¶Ê†ºÂºèÁöÑÁªèÁ∫¨Â∫¶‰ø°ÊÅØ
+-- @string[opt=nil] typÔºåËøîÂõûÁöÑÁªèÁ∫¨Â∫¶Ê†ºÂºèÔºåtyp‰∏∫"DEGREE_MINUTE"Êó∂Ë°®Á§∫ËøîÂõûÂ∫¶ÂàÜÊ†ºÂºèÔºåÂÖ∂‰ΩôË°®Á§∫ËøîÂõûÂ∫¶Ê†ºÂºè
+-- @return table location
+-- ‰æãÂ¶Çtyp‰∏∫"DEGREE_MINUTE"Êó∂ËøîÂõû{lngType="E",lng="12128.44954",latType="N",lat="3114.50931"}
+-- ‰æãÂ¶Çtyp‰∏çÊòØ"DEGREE_MINUTE"Êó∂ËøîÂõû{lngType="E",lng="121.123456",latType="N",lat="31.123456"}
+-- lngTypeÔºöstringÁ±ªÂûãÔºåË°®Á§∫ÁªèÂ∫¶Á±ªÂûãÔºåÂèñÂÄº"E"Ôºå"W"
+-- lngÔºöstringÁ±ªÂûãÔºåË°®Á§∫Â∫¶Ê†ºÂºèÁöÑÁªèÂ∫¶ÂÄºÔºåÊó†ÊïàÊó∂‰∏∫""
+-- latTypeÔºöstringÁ±ªÂûãÔºåË°®Á§∫Á∫¨Â∫¶Á±ªÂûãÔºåÂèñÂÄº"N"Ôºå"S"
+-- latÔºöstringÁ±ªÂûãÔºåË°®Á§∫Â∫¶Ê†ºÂºèÁöÑÁ∫¨Â∫¶ÂÄºÔºåÊó†ÊïàÊó∂‰∏∫""
+-- @usage gps.getLocation()
+function getLocation(typ)
+    return {
+            lngType=longitudeType,
+            lng=isFix() and (typ=="DEGREE_MINUTE" and longitude or degreeMinuteToDegree(longitude)) or "",
+            latType=latitudeType,
+            lat=isFix() and (typ=="DEGREE_MINUTE" and latitude or degreeMinuteToDegree(latitude)) or ""
+         }
+end
+
+function getLastLocation(typ)
+    if typ=="DEGREE_MINUTE" then
+        return {
+            lngType=longitudeType,
+            lng=longitude,
+            latType=latitudeType,
+            lat=latitude
+         }
+    else
+        return (longitude and longitude~="") and degreeMinuteToDegree(longitude) or "", (latitude and latitude~="") and degreeMinuteToDegree(latitude) or ""
+    end
+end
+
+--- Ëé∑ÂèñÊµ∑Êãî
+-- @return number altitudeÔºåÊµ∑ÊãîÔºåÂçï‰ΩçÁ±≥
+-- @usage gps.getAltitude()
+function getAltitude()
+    return tonumber(smatch(altitude,"(%d+)") or "0")
+end
+
+--- Ëé∑ÂèñÈÄüÂ∫¶
+-- @return number kmSpeedÔºåÁ¨¨‰∏Ä‰∏™ËøîÂõûÂÄº‰∏∫ÂÖ¨ÈáåÊØèÂ∞èÊó∂ÁöÑÈÄüÂ∫¶
+-- @return number nmSpeedÔºåÁ¨¨‰∫å‰∏™ËøîÂõûÂÄº‰∏∫Êµ∑ÈáåÊØèÂ∞èÊó∂ÁöÑÈÄüÂ∫¶
+-- @usage gps.getSpeed()
+function getSpeed()
+    local integer = tonumber(smatch(speed,"(%d+)") or "0")
+    return (integer*1852 - (integer*1852 %1000))/1000,integer
+end
+
+--- Ëé∑ÂèñÂéüÂßãÈÄüÂ∫¶,Â≠óÁ¨¶‰∏≤Â∏¶ÊµÆÁÇπ
+-- @return number speed Êµ∑ÈáåÊØèÂ∞èÊó∂ÁöÑÈÄüÂ∫¶
+-- @usage gps.getOrgSpeed()
+function getOrgSpeed()
+    return speed
+end
+
+--- Ëé∑ÂèñÊñπÂêëËßí
+-- @return number courseÔºåÊñπÂêëËßí
+-- @usage gps.getCourse()
+function getCourse()
+    return tonumber(smatch(course,"(%d+)") or "0")
+end
+
+-- Ëé∑ÂèñÊâÄÊúâÂèØËßÅÂç´ÊòüÁöÑÊúÄÂ§ß‰ø°Âè∑Âº∫Â∫¶
+-- @return number strengthÔºåÊúÄÂ§ß‰ø°Âè∑Âº∫Â∫¶
+-- @usage gps.getMaxSignalStrength()
+function getMaxSignalStrength()
+    return maxSignalStrength
+end
+
+--- Ëé∑ÂèñÂèØËßÅÂç´ÊòüÁöÑ‰∏™Êï∞
+-- @return number countÔºåÂèØËßÅÂç´ÊòüÁöÑ‰∏™Êï∞
+-- @usage gps.getViewedSateCnt()
+function getViewedSateCnt()
+    return tonumber(viewedGpsSateCnt)+tonumber(viewedBdSateCnt)
+end
+
+--- Ëé∑ÂèñÂÆö‰Ωç‰ΩøÁî®ÁöÑÂç´Êòü‰∏™Êï∞
+-- @return number countÔºåÂÆö‰Ωç‰ΩøÁî®ÁöÑÂç´Êòü‰∏™Êï∞
+-- @usage gps.getUsedSateCnt()
+function getUsedSateCnt()
+    return tonumber(usedSateCnt)
+end
+
+--- Ëé∑ÂèñGGAËØ≠Âè•‰∏≠Â∫¶ÂàÜÊ†ºÂºèÁöÑÁªèÁ∫¨Â∫¶‰ø°ÊÅØ
+-- @return string lngÔºåÂ∫¶ÂàÜÊ†ºÂºèÁöÑÁªèÂ∫¶ÂÄº(dddmm.mmmm)ÔºåË•øÁªè‰ºöÊ∑ªÂä†‰∏Ä‰∏™-ÂâçÁºÄÔºåÊó†ÊïàÊó∂‰∏∫""Ôºõ‰æãÂ¶Ç"12112.3456"Ë°®Á§∫‰∏úÁªè121Â∫¶12.3456ÂàÜÔºå"-12112.3456"Ë°®Á§∫Ë•øÁªè121Â∫¶12.3456ÂàÜ
+-- @return string latÔºåÂ∫¶ÂàÜÊ†ºÂºèÁöÑÁ∫¨Â∫¶ÂÄº(ddmm.mmmm)ÔºåÂçóÁ∫¨‰ºöÊ∑ªÂä†‰∏Ä‰∏™-ÂâçÁºÄÔºåÊó†ÊïàÊó∂‰∏∫""Ôºõ‰æãÂ¶Ç"3112.3456"Ë°®Á§∫ÂåóÁ∫¨31Â∫¶12.3456ÂàÜÔºå"-3112.3456"Ë°®Á§∫ÂçóÁ∫¨31Â∫¶12.3456ÂàÜ
+-- @usage gps.getGgaloc()
+function getGgaloc()
+	return Ggalng or "",Ggalat or ""
+end
+
+--- Ëé∑ÂèñRMCËØ≠Âè•‰∏≠ÁöÑUTCÊó∂Èó¥
+-- Âè™ÊúâÂêåÊó∂Êª°Ë∂≥Â¶Ç‰∏ã‰∏§‰∏™Êù°‰ª∂ÔºåËøîÂõûÂÄºÊâçÊúâÊïà
+-- 1„ÄÅÂºÄÂêØ‰∫ÜGPSÔºåÂπ∂‰∏îÂÆö‰ΩçÊàêÂäü
+-- 2„ÄÅË∞ÉÁî®setParseItemÊé•Âè£ÔºåÁ¨¨‰∏Ä‰∏™ÂèÇÊï∞ËÆæÁΩÆ‰∏∫true
+-- @return table utcTimeÔºåUTCÊó∂Èó¥ÔºånilË°®Á§∫Êó†ÊïàÔºå‰æãÂ¶Ç{year=2018,month=4,day=24,hour=11,min=52,sec=10}
+-- @usage gps.getUtcTime()
+function getUtcTime()
+	return UtcTime
+end
+
+--- Ëé∑ÂèñÂÆö‰Ωç‰ΩøÁî®ÁöÑÂ§ßÂú∞È´ò
+-- @return number sepÔºåÂ§ßÂú∞È´ò
+-- @usage gps.getSep()
+function getSep()
+	return tonumber(Sep or "0")
+end
+
+--- Ëé∑ÂèñGSAËØ≠Âè•‰∏≠ÁöÑÂèØËßÅÂç´ÊòüÂè∑
+-- Âè™ÊúâÂêåÊó∂Êª°Ë∂≥Â¶Ç‰∏ã‰∏§‰∏™Êù°‰ª∂ÔºåËøîÂõûÂÄºÊâçÊúâÊïà
+-- 1„ÄÅÂºÄÂêØ‰∫ÜGPSÔºåÂπ∂‰∏îÂÆö‰ΩçÊàêÂäü
+-- 2„ÄÅË∞ÉÁî®setParseItemÊé•Âè£ÔºåÁ¨¨‰∏â‰∏™ÂèÇÊï∞ËÆæÁΩÆ‰∏∫true
+-- @return string viewedSateIdÔºåÂèØÁî®Âç´ÊòüÂè∑Ôºå""Ë°®Á§∫Êó†Êïà
+-- @usage gps.getSateSn()
+function getSateSn()
+	return SateSn or ""
+end
+
+--- Ëé∑ÂèñGSVËØ≠Âè•‰∏≠ÁöÑÂèØËßÅÂç´ÊòüÁöÑ‰ø°Âô™ÊØî
+-- Âè™ÊúâÂêåÊó∂Êª°Ë∂≥Â¶Ç‰∏ã‰∏§‰∏™Êù°‰ª∂ÔºåËøîÂõûÂÄºÊâçÊúâÊïà
+-- 1„ÄÅÂºÄÂêØ‰∫ÜGPSÔºåÂπ∂‰∏îÂÆö‰ΩçÊàêÂäü
+-- 2„ÄÅË∞ÉÁî®setParseItemÊé•Âè£ÔºåÁ¨¨‰∫å‰∏™ÂèÇÊï∞ËÆæÁΩÆ‰∏∫true
+-- @return string gsvÔºå‰ø°Âô™ÊØî
+-- @usage gps.getGsv()
+function getGsv()
+	return Gsv or ""
+end
+
+--- ËÆæÁΩÆÊòØÂê¶ÈúÄË¶ÅËß£ÊûêÁöÑÂ≠óÊÆµ
+-- @bool[opt=nil] utcTimeÔºåÊòØÂê¶Ëß£ÊûêRMCËØ≠Âè•‰∏≠ÁöÑUTCÊó∂Èó¥ÔºåtrueË°®Á§∫Ëß£ÊûêÔºåfalseÊàñËÄÖnil‰∏çËß£Êûê
+-- @bool[opt=nil] gsvÔºåÊòØÂê¶Ëß£ÊûêGSVËØ≠Âè•ÔºåtrueË°®Á§∫Ëß£ÊûêÔºåfalseÊàñËÄÖnil‰∏çËß£Êûê
+-- @bool[opt=nil] gsaIdÔºåÊòØÂê¶Ëß£ÊûêGSAËØ≠Âè•‰∏≠ÁöÑÂç´ÊòüIDÔºåtrueË°®Á§∫Ëß£ÊûêÔºåfalseÊàñËÄÖnil‰∏çËß£Êûê
+-- @usage gps.setParseItem(true,true,true)
+function setParseItem(utcTime,gsv,gsaId)
+    psUtcTime,psGsv,psSn = utcTime,gsv,gsaId
+end
+
+sys.subscribe("GPS_STATE",statInd)

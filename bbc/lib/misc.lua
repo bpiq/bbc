@@ -1,401 +1,224 @@
---[[
-Ä£¿éÃû³Æ£ºÔÓÏî¹ÜÀí
-Ä£¿é¹¦ÄÜ£ºÐòÁÐºÅ¡¢IMEI¡¢µ×²ãÈí¼þ°æ±¾ºÅ¡¢Ê±ÖÓ¡¢ÊÇ·ñÐ£×¼¡¢·ÉÐÐÄ£Ê½¡¢²éÑ¯µç³ØµçÁ¿µÈ¹¦ÄÜ
-Ä£¿é×îºóÐÞ¸ÄÊ±¼ä£º2017.02.14
-]]
+--- æ¨¡å—åŠŸèƒ½ï¼šé…ç½®ç®¡ç†-åºåˆ—å·ã€IMEIã€åº•å±‚è½¯ä»¶ç‰ˆæœ¬å·ã€æ—¶é’Ÿã€æ˜¯å¦æ ¡å‡†ã€é£žè¡Œæ¨¡å¼ã€æŸ¥è¯¢ç”µæ± ç”µé‡ç­‰åŠŸèƒ½
+-- @module misc
+-- @author openLuat
+-- @license MIT
+-- @copyright openLuat
+-- @release 2017.10.20
+require "ril"
+local req = ril.request
+module(..., package.seeall)
+--snï¼šåºåˆ—å·
+--imeiï¼šIMEI
+-- calib æ ¡å‡†æ ‡å¿—
+local sn, imei, calib, ver, muid
+local setSnCbFnc,setImeiCbFnc,setClkCbFnc
 
---¶¨ÒåÄ£¿é,µ¼ÈëÒÀÀµ¿â
-local string = require"string"
-local ril = require"ril"
-local sys = require"sys"
-local base = _G
-local os = require"os"
-local io = require"io"
-local rtos = require"rtos"
-local pmd = require"pmd"
-module(...)
+local function timeReport()
+    sys.publish("TIME_CLK_IND")
+    sys.timerStart(setTimeReport,2000)
+end
 
---¼ÓÔØ³£ÓÃµÄÈ«¾Öº¯ÊýÖÁ±¾µØ
-local type,assert,tonumber,tostring,print,req,smatch = base.type,base.assert,base.tonumber,base.tostring,base.print,ril.request,string.match
-
---sn£ºÐòÁÐºÅ
---snrdy£ºÊÇ·ñÒÑ¾­³É¹¦¶ÁÈ¡¹ýÐòÁÐºÅ
---imei£ºIMEI
---imeirdy£ºÊÇ·ñÒÑ¾­³É¹¦¶ÁÈ¡¹ýIMEI
---ver£ºµ×²ãÈí¼þ°æ±¾ºÅ
---clkswitch£ºÕû·ÖÊ±ÖÓÍ¨Öª¿ª¹Ø
---updating£ºÊÇ·ñÕýÔÚÖ´ÐÐÔ¶³ÌÉý¼¶¹¦ÄÜ(update.lua)
---dbging£ºÊÇ·ñÕýÔÚÖ´ÐÐdbg¹¦ÄÜ(dbg.lua)
---ntping£ºÊÇ·ñÕýÔÚÖ´ÐÐNTPÊ±¼äÍ¬²½¹¦ÄÜ(ntp.lua)
---flypending£ºÊÇ·ñÓÐµÈ´ý´¦ÀíµÄ½øÈë·ÉÐÐÄ£Ê½ÇëÇó
-local sn,snrdy,imeirdy,--[[ver,]]imei,clkswitch,updating,dbging,ntping,flypending
-
---calib£ºÐ£×¼±êÖ¾£¬trueÎªÒÑÐ£×¼£¬ÆäÓàÎ´Ð£×¼
---setclkcb£ºÖ´ÐÐAT+CCLKÃüÁî£¬Ó¦´ðºóµÄÓÃ»§×Ô¶¨Òå»Øµ÷º¯Êý
---wimeicb£ºÖ´ÐÐAT+WIMEIÃüÁî£¬Ó¦´ðºóµÄÓÃ»§×Ô¶¨Òå»Øµ÷º¯Êý
---wsncb£ºÖ´ÐÐAT+WISNÃüÁî£¬Ó¦´ðºóµÄÓÃ»§×Ô¶¨Òå»Øµ÷º¯Êý
-local calib,setclkcb,wimeicb,wsncb
-
---[[
-º¯ÊýÃû£ºrsp
-¹¦ÄÜ  £º±¾¹¦ÄÜÄ£¿éÄÚ¡°Í¨¹ýÐéÄâ´®¿Ú·¢ËÍµ½µ×²ãcoreÈí¼þµÄATÃüÁî¡±µÄÓ¦´ð´¦Àí
-²ÎÊý  £º
-		cmd£º´ËÓ¦´ð¶ÔÓ¦µÄATÃüÁî
-		success£ºATÃüÁîÖ´ÐÐ½á¹û£¬true»òÕßfalse
-		response£ºATÃüÁîµÄÓ¦´ðÖÐµÄÖ´ÐÐ½á¹û×Ö·û´®
-		intermediate£ºATÃüÁîµÄÓ¦´ðÖÐµÄÖÐ¼äÐÅÏ¢
-·µ»ØÖµ£ºÎÞ
-]]
-local function rsp(cmd,success,response,intermediate)
-	local prefix = string.match(cmd,"AT(%+%u+)")
-	--²éÑ¯ÐòÁÐºÅ
-	if cmd == "AT+WISN?" then
-		sn = intermediate
-		if wsncb then wsncb(success) end
-		--Èç¹ûÃ»ÓÐ³É¹¦¶ÁÈ¡¹ýÐòÁÐºÅ£¬Ôò²úÉúÒ»¸öÄÚ²¿ÏûÏ¢SN_READY£¬±íÊ¾ÒÑ¾­¶ÁÈ¡µ½ÐòÁÐºÅ
-		if not snrdy then sys.dispatch("SN_READY") snrdy = true end
-	--²éÑ¯µ×²ãÈí¼þ°æ±¾ºÅ
-	--[[elseif cmd == "AT+VER" then
-		ver = intermediate]]
-	--²éÑ¯IMEI
-	elseif cmd == "AT+CGSN" then
-		imei = intermediate
-		if wimeicb then wimeicb(success) end
-		--Èç¹ûÃ»ÓÐ³É¹¦¶ÁÈ¡¹ýIMEI£¬Ôò²úÉúÒ»¸öÄÚ²¿ÏûÏ¢IMEI_READY£¬±íÊ¾ÒÑ¾­¶ÁÈ¡µ½IMEI
-		if not imeirdy then sys.dispatch("IMEI_READY") imeirdy = true end
-	--Ð´IMEI
-	elseif smatch(cmd,"AT%+WIMEI=") then
-		if wimeicb then
-			req("AT+CGSN")
-			--wimeicb(success)
-		else			
-			if tonumber(smatch(sys.getcorever(),"Luat_V(%d+)_"))>15 then sys.restart("WIMEI") end
-		end
-	--Ð´ÐòÁÐºÅ
-	elseif smatch(cmd,"AT%+WISN=") then
-		if wsncb then
-			req("AT+WISN?")
-			--wsncb(success)
-		else			
-			if tonumber(smatch(sys.getcorever(),"Luat_V(%d+)_"))>15 then sys.restart("WISN") end
-		end
-	--ÉèÖÃÏµÍ³Ê±¼ä
-	elseif prefix == "+CCLK" then
-		startclktimer()
-		--ATÃüÁîÓ¦´ð´¦Àí½áÊø£¬Èç¹ûÓÐ»Øµ÷º¯Êý
-		if setclkcb then
-			setclkcb(cmd,success,response,intermediate)
-		end
-	--²éÑ¯ÊÇ·ñÐ£×¼
-	elseif cmd == "AT+ATWMFT=99" then
-		print('ATWMFT',intermediate)
-		if intermediate == "SUCC" then
-			calib = true
-		else
-			calib = false
-		end
-	--½øÈë»òÍË³ö·ÉÐÐÄ£Ê½
-	elseif smatch(cmd,"AT%+CFUN=[01]") then
-		--²úÉúÒ»¸öÄÚ²¿ÏûÏ¢FLYMODE_IND£¬±íÊ¾·ÉÐÐÄ£Ê½×´Ì¬·¢Éú±ä»¯
-		sys.dispatch("FLYMODE_IND",smatch(cmd,"AT%+CFUN=(%d)")=="0")
-	end
-	
+function setTimeReport()
+    sys.timerStart(timeReport,(os.time()%60==0) and 50 or (60-os.time()%60)*1000)
 end
 
 --[[
-º¯ÊýÃû£ºsetclock
-¹¦ÄÜ  £ºÉèÖÃÏµÍ³Ê±¼ä
-²ÎÊý  £º
-		t£ºÏµÍ³Ê±¼ä±í£¬¸ñÊ½²Î¿¼£º{year=2017,month=2,day=14,hour=14,min=2,sec=58}
-		rspfunc£ºÉèÖÃÏµÍ³Ê±¼äºóµÄÓÃ»§×Ô¶¨Òå»Øµ÷º¯Êý
-·µ»ØÖµ£ºÎÞ
+å‡½æ•°åï¼šrsp
+åŠŸèƒ½  ï¼šæœ¬åŠŸèƒ½æ¨¡å—å†…â€œé€šè¿‡è™šæ‹Ÿä¸²å£å‘é€åˆ°åº•å±‚coreè½¯ä»¶çš„ATå‘½ä»¤â€çš„åº”ç­”å¤„ç†
+å‚æ•°  ï¼š
+cmdï¼šæ­¤åº”ç­”å¯¹åº”çš„ATå‘½ä»¤
+successï¼šATå‘½ä»¤æ‰§è¡Œç»“æžœï¼Œtrueæˆ–è€…false
+responseï¼šATå‘½ä»¤çš„åº”ç­”ä¸­çš„æ‰§è¡Œç»“æžœå­—ç¬¦ä¸²
+intermediateï¼šATå‘½ä»¤çš„åº”ç­”ä¸­çš„ä¸­é—´ä¿¡æ¯
+è¿”å›žå€¼ï¼šæ— 
 ]]
-function setclock(t,rspfunc)
-	if t.year - 2000 > 38 then return end
-	setclkcb = rspfunc
-	req(string.format("AT+CCLK=\"%02d/%02d/%02d,%02d:%02d:%02d+32\"",string.sub(t.year,3,4),t.month,t.day,t.hour,t.min,t.sec),nil,rsp)
+local function rsp(cmd, success, response, intermediate)
+    local prefix = string.match(cmd, "AT(%+%u+)")
+    --æŸ¥è¯¢åºåˆ—å·
+    if cmd == "AT+WISN?" then
+        sn = intermediate
+        if setSnCbFnc then setSnCbFnc(true) end
+        sys.publish('SN_READY_IND')
+    --æŸ¥è¯¢IMEI
+    elseif cmd == "AT+CGSN" then
+        imei = intermediate
+        if setImeiCbFnc then setImeiCbFnc(true) end
+        sys.publish('IMEI_READY_IND')
+    elseif cmd == 'AT+VER' then
+        ver = intermediate
+    --æŸ¥è¯¢æ˜¯å¦æ ¡å‡†
+    elseif cmd == "AT+ATWMFT=99" then
+        log.info('misc.ATWMFT', intermediate)
+        if intermediate == "SUCC" then
+            calib = true
+        else
+            calib = false
+        end
+    elseif prefix == '+CCLK' then
+        if success then
+            sys.publish('TIME_UPDATE_IND')
+            setTimeReport()
+        end
+        if setClkCbFnc then setClkCbFnc(getClock(),success) end
+    elseif cmd:match("AT%+WISN=") then
+        if success then
+            req("AT+WISN?")
+        else
+            if setSnCbFnc then setSnCbFnc(false) end
+        end
+    elseif cmd:match("AT%+WIMEI=") then
+        if success then
+            req("AT+CGSN")
+        else
+            if setImeiCbFnc then setImeiCbFnc(false) end
+        end
+    elseif cmd:match("AT%+MUID?") then
+        if intermediate then muid = intermediate:match("+MUID:%s*\"(.+)\"") end
+    end
 end
 
---[[
-º¯ÊýÃû£ºgetclockstr
-¹¦ÄÜ  £º»ñÈ¡ÏµÍ³Ê±¼ä×Ö·û´®
-²ÎÊý  £ºÎÞ
-·µ»ØÖµ£ºÏµÍ³Ê±¼ä×Ö·û´®£¬¸ñÊ½ÎªYYMMDDhhmmss£¬ÀýÈç170214141602£¬17Äê2ÔÂ14ÈÕ14Ê±16·Ö02Ãë
-]]
-function getclockstr()
-	local clk = os.date("*t")
-	clk.year = string.sub(clk.year,3,4)
-	return string.format("%02d%02d%02d%02d%02d%02d",clk.year,clk.month,clk.day,clk.hour,clk.min,clk.sec)
+function getVersion()
+    return ver
 end
 
---[[
-º¯ÊýÃû£ºgetweek
-¹¦ÄÜ  £º»ñÈ¡ÐÇÆÚ
-²ÎÊý  £ºÎÞ
-·µ»ØÖµ£ºÐÇÆÚ£¬numberÀàÐÍ£¬1-7·Ö±ð¶ÔÓ¦ÖÜÒ»µ½ÖÜÈÕ
-]]
-function getweek()
-	local clk = os.date("*t")
-	return ((clk.wday == 1) and 7 or (clk.wday - 1))
+--- è®¾ç½®ç³»ç»Ÿæ—¶é—´
+-- @table t,ç³»ç»Ÿæ—¶é—´ï¼Œæ ¼å¼å‚è€ƒï¼š{year=2017,month=2,day=14,hour=14,min=2,sec=58}
+-- @function[opt=nil] cbFncï¼Œè®¾ç½®ç»“æžœå›žè°ƒå‡½æ•°ï¼Œå›žè°ƒå‡½æ•°çš„è°ƒç”¨å½¢å¼ä¸ºï¼š
+-- cnFnc(timeï¼Œresult)ï¼Œresultä¸ºtrueè¡¨ç¤ºæˆåŠŸï¼Œfalseæˆ–è€…nilä¸ºå¤±è´¥ï¼›timeè¡¨ç¤ºè®¾ç½®ä¹‹åŽçš„ç³»ç»Ÿæ—¶é—´ï¼Œtableç±»åž‹ï¼Œä¾‹å¦‚{year=2017,month=2,day=14,hour=14,min=19,sec=23}
+-- @return nil
+-- @usage misc.setClock({year=2017,month=2,day=14,hour=14,min=2,sec=58})
+function setClock(t,cbFnc)
+    if type(t) ~= "table" or (t.year-2000>38) then
+        if cbFnc then cbFnc(getClock(),false) end
+        return
+    end
+    setClkCbFnc = cbFnc
+    req(string.format("AT+CCLK=\"%02d/%02d/%02d,%02d:%02d:%02d+32\"", string.sub(t.year, 3, 4), t.month, t.day, t.hour, t.min, t.sec), nil, rsp)
+end
+--- èŽ·å–ç³»ç»Ÿæ—¶é—´
+-- @return table time,{year=2017,month=2,day=14,hour=14,min=19,sec=23}
+-- @usage time = getClock()
+function getClock()
+    return os.date("*t")
+end
+--- èŽ·å–æ˜ŸæœŸ
+-- @return number weekï¼Œ1-7åˆ†åˆ«å¯¹åº”å‘¨ä¸€åˆ°å‘¨æ—¥
+-- @usage week = misc.getWeek()
+function getWeek()
+    local clk = os.date("*t")
+    return ((clk.wday == 1) and 7 or (clk.wday - 1))
+end
+--- èŽ·å–æ ¡å‡†æ ‡å¿—
+-- @return bool calib, trueè¡¨ç¤ºå·²æ ¡å‡†ï¼Œfalseæˆ–è€…nilè¡¨ç¤ºæœªæ ¡å‡†
+-- @usage calib = misc.getCalib()
+function getCalib()
+    return calib
+end
+--- è®¾ç½®SN
+-- @string s,æ–°snçš„å­—ç¬¦ä¸²
+-- @function[opt=nil] cbFnc,è®¾ç½®ç»“æžœå›žè°ƒå‡½æ•°ï¼Œå›žè°ƒå‡½æ•°çš„è°ƒç”¨å½¢å¼ä¸ºï¼š
+-- cnFnc(result)ï¼Œresultä¸ºtrueè¡¨ç¤ºæˆåŠŸï¼Œfalseæˆ–è€…nilä¸ºå¤±è´¥
+-- @return nil
+-- @usage
+-- misc.setSn("1234567890")
+-- misc.setSn("1234567890",cbFnc)
+function setSn(s, cbFnc)
+    if s ~= sn then
+        setSnCbFnc = cbFnc
+        req("AT+WISN=\"" .. s .. "\"") 
+    else
+        if cbFnc then cbFnc(true) end
+    end
+end
+--- èŽ·å–æ¨¡å—åºåˆ—å·
+-- @return string sn,åºåˆ—å·ï¼Œå¦‚æžœæœªèŽ·å–åˆ°è¿”å›ž""
+-- æ³¨æ„ï¼šå¼€æœºluaè„šæœ¬è¿è¡Œä¹‹åŽï¼Œä¼šå‘é€atå‘½ä»¤åŽ»æŸ¥è¯¢snï¼Œæ‰€ä»¥éœ€è¦ä¸€å®šæ—¶é—´æ‰èƒ½èŽ·å–åˆ°snã€‚å¼€æœºåŽç«‹å³è°ƒç”¨æ­¤æŽ¥å£ï¼ŒåŸºæœ¬ä¸Šè¿”å›ž""
+-- @usage sn = misc.getSn()
+function getSn()
+    return sn or ""
+end
+--- è®¾ç½®IMEI
+-- @string s,æ–°IMEIå­—ç¬¦ä¸²
+-- @function[opt=nil] cbFnc,è®¾ç½®ç»“æžœå›žè°ƒå‡½æ•°ï¼Œå›žè°ƒå‡½æ•°çš„è°ƒç”¨å½¢å¼ä¸ºï¼š
+-- cnFnc(result)ï¼Œresultä¸ºtrueè¡¨ç¤ºæˆåŠŸï¼Œfalseæˆ–è€…nilä¸ºå¤±è´¥
+-- @return nil
+-- @usage misc.setImei(â€359759002514931â€)
+function setImei(s, cbFnc)
+    if s ~= imei then
+        setImeiCbFnc = cbFnc
+        req("AT+WIMEI=\"" .. s .. "\"")
+    else
+        if cbFnc then cbFnc(true) end
+    end
+end
+--- èŽ·å–æ¨¡å—IMEI
+-- @return string,IMEIå·ï¼Œå¦‚æžœæœªèŽ·å–åˆ°è¿”å›ž""
+-- æ³¨æ„ï¼šå¼€æœºluaè„šæœ¬è¿è¡Œä¹‹åŽï¼Œä¼šå‘é€atå‘½ä»¤åŽ»æŸ¥è¯¢imeiï¼Œæ‰€ä»¥éœ€è¦ä¸€å®šæ—¶é—´æ‰èƒ½èŽ·å–åˆ°imeiã€‚å¼€æœºåŽç«‹å³è°ƒç”¨æ­¤æŽ¥å£ï¼ŒåŸºæœ¬ä¸Šè¿”å›ž""
+-- @usage imei = misc.getImei()
+function getImei()
+    return imei or ""
+end
+--- èŽ·å–VBATçš„ç”µæ± ç”µåŽ‹
+-- @return number,ç”µæ± ç”µåŽ‹,å•ä½mv
+-- @usage vb = getVbatt()
+function getVbatt()
+    local v1, v2, v3, v4, v5 = pmd.param_get()
+    return v2
 end
 
---[[
-º¯ÊýÃû£ºgetclock
-¹¦ÄÜ  £º»ñÈ¡ÏµÍ³Ê±¼ä±í
-²ÎÊý  £ºÎÞ
-·µ»ØÖµ£ºtableÀàÐÍµÄÊ±¼ä£¬ÀýÈç{year=2017,month=2,day=14,hour=14,min=19,sec=23}
-]]
-function getclock()
-	return os.date("*t")
+--- èŽ·å–æ¨¡å—MUID
+-- @return string,MUIDå·ï¼Œå¦‚æžœæœªèŽ·å–åˆ°è¿”å›ž""
+-- æ³¨æ„ï¼šå¼€æœºluaè„šæœ¬è¿è¡Œä¹‹åŽï¼Œä¼šå‘é€atå‘½ä»¤åŽ»æŸ¥è¯¢muidï¼Œæ‰€ä»¥éœ€è¦ä¸€å®šæ—¶é—´æ‰èƒ½èŽ·å–åˆ°muidã€‚å¼€æœºåŽç«‹å³è°ƒç”¨æ­¤æŽ¥å£ï¼ŒåŸºæœ¬ä¸Šè¿”å›ž""
+-- @usage muid = misc.getMuid()
+function getMuid()
+    return muid or ""
 end
 
---[[
-º¯ÊýÃû£ºstartclktimer
-¹¦ÄÜ  £ºÑ¡ÔñÐÔµÄÆô¶¯Õû·ÖÊ±ÖÓÍ¨Öª¶¨Ê±Æ÷
-²ÎÊý  £ºÎÞ
-·µ»ØÖµ£ºÎÞ
-]]
-function startclktimer()
-	--¿ª¹Ø¿ªÆô »òÕß ¹¤×÷Ä£Ê½ÎªÍêÕûÄ£Ê½
-	if clkswitch or sys.getworkmode()==sys.FULL_MODE then
-		--²úÉúÒ»¸öÄÚ²¿ÏûÏ¢CLOCK_IND£¬±íÊ¾ÏÖÔÚÊÇÕû·Ö£¬ÀýÈç12µã13·Ö00Ãë¡¢14µã34·Ö00Ãë
-		sys.dispatch("CLOCK_IND")
-		print('CLOCK_IND',os.date("*t").sec)
-		--Æô¶¯ÏÂ´ÎÍ¨ÖªµÄ¶¨Ê±Æ÷
-		sys.timer_start(startclktimer,(60-os.date("*t").sec)*1000)
-	end
+--- æ‰“å¼€å¹¶ä¸”é…ç½®PWM(æ”¯æŒ2è·¯PWMï¼Œä»…æ”¯æŒè¾“å‡º)
+-- è¯´æ˜Žï¼š
+-- å½“idä¸º0æ—¶ï¼šperiod å–å€¼åœ¨ 80-1625 HzèŒƒå›´å†…æ—¶ï¼Œlevel å ç©ºæ¯”å–å€¼èŒƒå›´ä¸ºï¼š1-100ï¼›
+-- period å–å€¼åœ¨ 1626-65535 HzèŒƒå›´æ—¶ï¼Œè®¾x=162500/period, y=x * level / 100, x å’Œ yè¶Šæ˜¯æŽ¥è¿‘æ­£çš„æ•´æ•°ï¼Œåˆ™è¾“å‡ºæ³¢å½¢è¶Šå‡†ç¡®
+-- @number idï¼ŒPWMè¾“å‡ºé€šé“ï¼Œä»…æ”¯æŒ0å’Œ1ï¼Œ0ç”¨çš„æ˜¯uart2 txï¼Œ1ç”¨çš„æ˜¯uart2 rx
+-- @number periodï¼Œ
+-- å½“idä¸º0æ—¶ï¼Œperiodè¡¨ç¤ºé¢‘çŽ‡ï¼Œå•ä½ä¸ºHzï¼Œå–å€¼èŒƒå›´ä¸º80-1625ï¼Œä»…æ”¯æŒæ•´æ•°
+-- å½“idä¸º1æ—¶ï¼Œå–å€¼èŒƒå›´ä¸º0-7ï¼Œä»…æ”¯æŒæ•´æ•°ï¼Œè¡¨ç¤ºæ—¶é’Ÿå‘¨æœŸï¼Œå•ä½ä¸ºæ¯«ç§’ï¼Œ0-7åˆ†åˆ«å¯¹åº”125ã€250ã€500ã€1000ã€1500ã€2000ã€2500ã€3000æ¯«ç§’
+-- @number levelï¼Œ
+-- å½“idä¸º0æ—¶ï¼Œlevelè¡¨ç¤ºå ç©ºæ¯”ï¼Œå•ä½ä¸ºlevel%ï¼Œå–å€¼èŒƒå›´ä¸º1-100ï¼Œä»…æ”¯æŒæ•´æ•°
+-- å½“idä¸º1æ—¶ï¼Œå–å€¼èŒƒå›´ä¸º1-15ï¼Œä»…æ”¯æŒæ•´æ•°ï¼Œè¡¨ç¤ºä¸€ä¸ªæ—¶é’Ÿå‘¨æœŸå†…çš„é«˜ç”µå¹³æ—¶é—´ï¼Œå•ä½ä¸ºæ¯«ç§’
+--                      1-15åˆ†åˆ«å¯¹åº”15.6ã€31.2ã€46.9ã€62.5ã€78.1ã€93.7ã€110ã€125ã€141ã€156ã€172ã€187ã€203ã€219ã€234æ¯«ç§’
+-- @return nil
+function openPwm(id, period, level)
+    assert(type(id) == "number" and type(period) == "number" and type(level) == "number", "openpwm type error")
+    assert(id == 0 or id == 1, "openpwm id error: " .. id)
+    local pmin, pmax, lmin, lmax = 80, 1625, 1, 100
+    if id == 1 then pmin, pmax, lmin, lmax = 0, 7, 1, 15 end
+    assert(period >= pmin and period <= pmax, "openpwm period error: " .. period)
+    assert(level >= lmin and level <= lmax, "openpwm level error: " .. level)
+    req("AT+SPWM=" .. id .. "," .. period .. "," .. level)
 end
 
---[[
-º¯ÊýÃû£ºsetclkswitch
-¹¦ÄÜ  £ºÉèÖÃ¡°Õû·ÖÊ±ÖÓÍ¨Öª¡±¿ª¹Ø
-²ÎÊý  £º
-		v£ºtrueÎª¿ªÆô£¬ÆäÓàÎª¹Ø±Õ
-·µ»ØÖµ£ºÎÞ
-]]
-function setclkswitch(v)
-	clkswitch = v
-	if v then startclktimer() end
+--- å…³é—­PWM
+-- @number idï¼ŒPWMè¾“å‡ºé€šé“ï¼Œä»…æ”¯æŒ0å’Œ1ï¼Œ0ç”¨çš„æ˜¯uart2 txï¼Œ1ç”¨çš„æ˜¯uart2 rx
+-- @return nil
+function closePwm(id)
+    assert(id == 0 or id == 1, "closepwm id error: " .. id)
+    req("AT+SPWM=" .. id .. ",0,0")
 end
 
---[[
-º¯ÊýÃû£ºgetsn
-¹¦ÄÜ  £º»ñÈ¡ÐòÁÐºÅ
-²ÎÊý  £ºÎÞ
-·µ»ØÖµ£ºÐòÁÐºÅ£¬Èç¹ûÎ´»ñÈ¡µ½·µ»Ø""
-]]
-function getsn()
-	return sn or ""
-end
-
---[[
-º¯ÊýÃû£ºisnvalid
-¹¦ÄÜ  £ºÅÐ¶ÏsnÊÇ·ñÓÐÐ§
-²ÎÊý  £ºÎÞ
-·µ»ØÖµ£ºÓÐÐ§·µ»Øtrue£¬·ñÔò·µ»Øfalse
-]]
-function isnvalid()
-	local snstr,sninvalid = getsn(),""
-	local len,i = string.len(snstr)
-	for i=1,len do
-		sninvalid = sninvalid.."0"
-	end
-	return snstr~=sninvalid
-end
-
---[[
-º¯ÊýÃû£ºgetimei
-¹¦ÄÜ  £º»ñÈ¡IMEI
-²ÎÊý  £ºÎÞ
-·µ»ØÖµ£ºIMEIºÅ£¬Èç¹ûÎ´»ñÈ¡µ½·µ»Ø""
-×¢Òâ£º¿ª»úlua½Å±¾ÔËÐÐÖ®ºó£¬»á·¢ËÍatÃüÁîÈ¥²éÑ¯imei£¬ËùÒÔÐèÒªÒ»¶¨Ê±¼ä²ÅÄÜ»ñÈ¡µ½imei¡£¿ª»úºóÁ¢¼´µ÷ÓÃ´Ë½Ó¿Ú£¬»ù±¾ÉÏ·µ»Ø""
-]]
-function getimei()
-	return imei or ""
-end
-
---[[
-º¯ÊýÃû£ºsetimei
-¹¦ÄÜ  £ºÉèÖÃIMEI
-		Èç¹û´«ÈëÁËcb£¬ÔòÉèÖÃIMEIºó²»»á×Ô¶¯ÖØÆô£¬ÓÃ»§±ØÐë×Ô¼º±£Ö¤ÉèÖÃ³É¹¦ºó£¬µ÷ÓÃsys.restart»òÕßdbg.restart½Ó¿Ú½øÐÐÈíÖØÆô;
-		Èç¹ûÃ»ÓÐ´«Èëcb£¬ÔòÉèÖÃ³É¹¦ºóÈí¼þ»á×Ô¶¯ÖØÆô
-²ÎÊý  £º
-		s£ºÐÂIMEI
-		cb£ºÉèÖÃºóµÄ»Øµ÷º¯Êý£¬µ÷ÓÃÊ±»á½«ÉèÖÃ½á¹û´«³öÈ¥£¬true±íÊ¾ÉèÖÃ³É¹¦£¬false»òÕßnil±íÊ¾Ê§°Ü£»
-·µ»ØÖµ£ºÎÞ
-]]
-function setimei(s,cb)
-	if s==imei then
-		if cb then cb(true) end
-	else
-		req("AT+AMFAC="..(cb and "0" or "1"))
-		req("AT+WIMEI=\""..s.."\"")
-		wimeicb = cb
-	end
-end
-
---[[
-º¯ÊýÃû£ºsetsn
-¹¦ÄÜ  £ºÉèÖÃSN
-		Èç¹û´«ÈëÁËcb£¬ÔòÉèÖÃSNºó²»»á×Ô¶¯ÖØÆô£¬ÓÃ»§±ØÐë×Ô¼º±£Ö¤ÉèÖÃ³É¹¦ºó£¬µ÷ÓÃsys.restart»òÕßdbg.restart½Ó¿Ú½øÐÐÈíÖØÆô;
-		Èç¹ûÃ»ÓÐ´«Èëcb£¬ÔòÉèÖÃ³É¹¦ºóÈí¼þ»á×Ô¶¯ÖØÆô
-²ÎÊý  £º
-		s£ºÐÂSN
-		cb£ºÉèÖÃºóµÄ»Øµ÷º¯Êý£¬µ÷ÓÃÊ±»á½«ÉèÖÃ½á¹û´«³öÈ¥£¬true±íÊ¾ÉèÖÃ³É¹¦£¬false»òÕßnil±íÊ¾Ê§°Ü£»
-·µ»ØÖµ£ºÎÞ
-]]
-function setsn(s,cb)
-	if s==sn then
-		if cb then cb(true) end
-	else
-		req("AT+AMFAC="..(cb and "0" or "1"))
-		req("AT+WISN=\""..s.."\"")
-		wsncb = cb
-	end
-end
-
-
---[[
-º¯ÊýÃû£ºsetflymode
-¹¦ÄÜ  £º¿ØÖÆ·ÉÐÐÄ£Ê½
-²ÎÊý  £º
-		val£ºtrueÎª½øÈë·ÉÐÐÄ£Ê½£¬falseÎªÍË³ö·ÉÐÐÄ£Ê½
-·µ»ØÖµ£ºÎÞ
-]]
-function setflymode(val)
-	--Èç¹ûÊÇ½øÈë·ÉÐÐÄ£Ê½
-	if val then
-		--Èç¹ûÕýÔÚÖ´ÐÐÔ¶³ÌÉý¼¶¹¦ÄÜ»òÕßdbg¹¦ÄÜ»òÕßntp¹¦ÄÜ£¬ÔòÑÓ³Ù½øÈë·ÉÐÐÄ£Ê½
-		if updating or dbging or ntping then flypending = true return end
-	end
-	--·¢ËÍATÃüÁî½øÈë»òÕßÍË³ö·ÉÐÐÄ£Ê½
-	req("AT+CFUN="..(val and 0 or 1))
-	flypending = false
-end
-
---[[
-º¯ÊýÃû£ºset
-¹¦ÄÜ  £º¼æÈÝÖ®Ç°Ð´µÄ¾É³ÌÐò£¬Ä¿Ç°Îª¿Õº¯Êý
-²ÎÊý  £ºÎÞ
-·µ»ØÖµ£ºÎÞ
-]]
-function set() end
-
---[[
-º¯ÊýÃû£ºgetcalib
-¹¦ÄÜ  £º»ñÈ¡ÊÇ·ñÐ£×¼±êÖ¾
-²ÎÊý  £ºÎÞ
-·µ»ØÖµ£ºtrueÎªÐ£×¼£¬ÆäÓàÎªÃ»Ð£×¼
-]]
-function getcalib()
-	return calib
-end
-
---[[
-º¯ÊýÃû£ºgetvbatvolt
-¹¦ÄÜ  £º»ñÈ¡VBATµÄµç³ØµçÑ¹
-²ÎÊý  £ºÎÞ
-·µ»ØÖµ£ºµçÑ¹£¬numberÀàÐÍ£¬µ¥Î»ºÁ·ü
-]]
-function getvbatvolt()
-	local v1,v2,v3,v4,v5 = pmd.param_get()
-	return v2
-end
-
---[[
-º¯ÊýÃû£ºopenpwm
-¹¦ÄÜ  £º´ò¿ª²¢ÇÒÅäÖÃPWM(Ö§³Ö2Â·PWM£¬½öÖ§³ÖÊä³ö)
-²ÎÊý  £º
-		id£ºnumberÀàÐÍ£¬PWMÊä³öÍ¨µÀ£¬½öÖ§³Ö0ºÍ1£¬0ÓÃµÄÊÇuart2 tx£¬1ÓÃµÄÊÇuart2 rx
-		period£ºnumberÀàÐÍ
-				µ±idÎª0Ê±£¬period±íÊ¾ÆµÂÊ£¬µ¥Î»ÎªHz£¬È¡Öµ·¶Î§Îª80-65535£¬½öÖ§³ÖÕûÊý
-				µ±idÎª1Ê±£¬È¡Öµ·¶Î§Îª0-7£¬½öÖ§³ÖÕûÊý£¬±íÊ¾Ê±ÖÓÖÜÆÚ£¬µ¥Î»ÎªºÁÃë£¬0-7·Ö±ð¶ÔÓ¦125¡¢250¡¢500¡¢1000¡¢1500¡¢2000¡¢2500¡¢3000ºÁÃë
-		level£ºnumberÀàÐÍ
-				µ±idÎª0Ê±£¬level±íÊ¾Õ¼¿Õ±È£¬µ¥Î»Îªlevel%£¬È¡Öµ·¶Î§Îª1-100£¬½öÖ§³ÖÕûÊý
-				µ±idÎª1Ê±£¬È¡Öµ·¶Î§Îª1-15£¬½öÖ§³ÖÕûÊý£¬±íÊ¾Ò»¸öÊ±ÖÓÖÜÆÚÄÚµÄ¸ßµçÆ½Ê±¼ä£¬µ¥Î»ÎªºÁÃë
-				1-15·Ö±ð¶ÔÓ¦15.6¡¢31.2¡¢46.9¡¢62.5¡¢78.1¡¢93.7¡¢110¡¢125¡¢141¡¢156¡¢172¡¢187¡¢203¡¢219¡¢234ºÁÃë
-·µ»ØÖµ£ºÎÞ
-ËµÃ÷£ºµ±idÎª0Ê±£º
-	  period È¡ÖµÔÚ 80-1625 Hz·¶Î§ÄÚÊ±£¬level Õ¼¿Õ±ÈÈ¡Öµ·¶Î§Îª£º1-100£»
-	  period È¡ÖµÔÚ 1626-65535 Hz·¶Î§Ê±£¬Éèx=162500/period, y=x * level / 100, x ºÍ yÔ½ÊÇ½Ó½üÕýµÄÕûÊý£¬ÔòÊä³ö²¨ÐÎÔ½×¼È·
-]]
-function openpwm(id,period,level)
-	assert(type(id)=="number" and type(period)=="number" and type(level)=="number","openpwm type error")
-	assert(id==0 or id==1,"openpwm id error: "..id)
-	--[[local pmin,pmax,lmin,lmax = 80,1625,1,100
-	if id==1 then pmin,pmax,lmin,lmax = 0,7,1,15 end
-	assert(period>=pmin and period<=pmax,"openpwm period error: "..period)
-	assert(level>=lmin and level<=lmax,"openpwm level error: "..level)]]
-	req("AT+SPWM="..id..","..period..","..level)
-end
-
---[[
-º¯ÊýÃû£ºclosepwm
-¹¦ÄÜ  £º¹Ø±ÕPWM
-²ÎÊý  £º
-		id£ºnumberÀàÐÍ£¬PWMÊä³öÍ¨µÀ£¬½öÖ§³Ö0ºÍ1£¬0ÓÃµÄÊÇuart2 tx£¬1ÓÃµÄÊÇuart2 rx
-·µ»ØÖµ£ºÎÞ
-]]
-function closepwm(id)
-	assert(id==0 or id==1,"closepwm id error: "..id)
-	req("AT+SPWM="..id..",0,0")
-end
-
---[[
-º¯ÊýÃû£ºind
-¹¦ÄÜ  £º±¾Ä£¿é×¢²áµÄÄÚ²¿ÏûÏ¢µÄ´¦Àíº¯Êý
-²ÎÊý  £º
-		id£ºÄÚ²¿ÏûÏ¢id
-		para£ºÄÚ²¿ÏûÏ¢²ÎÊý
-·µ»ØÖµ£ºtrue
-]]
-local function ind(id,para)
-	--¹¤×÷Ä£Ê½·¢Éú±ä»¯
-	if id=="SYS_WORKMODE_IND" then
-		startclktimer()
-	--Ô¶³ÌÉý¼¶¿ªÊ¼
-	elseif id=="UPDATE_BEGIN_IND" then
-		updating = true
-	--Ô¶³ÌÉý¼¶½áÊø
-	elseif id=="UPDATE_END_IND" then
-		updating = false
-		if flypending then setflymode(true) end
-	--dbg¹¦ÄÜ¿ªÊ¼
-	elseif id=="DBG_BEGIN_IND" then
-		dbging = true
-	--dbg¹¦ÄÜ½áÊø
-	elseif id=="DBG_END_IND" then
-		dbging = false
-		if flypending then setflymode(true) end
-	--NTPÍ¬²½¿ªÊ¼
-	elseif id=="NTP_BEGIN_IND" then
-		ntping = true
-	--NTPÍ¬²½½áÊø
-	elseif id=="NTP_END_IND" then
-		ntping = false
-		if flypending then setflymode(true) end
-	end
-
-	return true
-end
-
---×¢²áÒÔÏÂATÃüÁîµÄÓ¦´ð´¦Àíº¯Êý
-ril.regrsp("+ATWMFT",rsp)
-ril.regrsp("+WISN",rsp)
---ril.regrsp("+VER",rsp,4,"^[%w_]+$")
-ril.regrsp("+CGSN",rsp)
-ril.regrsp("+WIMEI",rsp)
-ril.regrsp("+AMFAC",rsp)
-ril.regrsp("+CFUN",rsp)
---²éÑ¯ÊÇ·ñÐ£×¼
+--æ³¨å†Œä»¥ä¸‹ATå‘½ä»¤çš„åº”ç­”å¤„ç†å‡½æ•°
+ril.regRsp("+ATWMFT", rsp)
+ril.regRsp("+WISN", rsp)
+ril.regRsp("+CGSN", rsp)
+ril.regRsp("+MUID", rsp)
+ril.regRsp("+WIMEI", rsp)
+ril.regRsp("+AMFAC", rsp)
+ril.regRsp('+VER', rsp, 4, '^[%w_]+$')
+req('AT+VER')
+--æŸ¥è¯¢æ˜¯å¦æ ¡å‡†
 req("AT+ATWMFT=99")
---²éÑ¯ÐòÁÐºÅ
+--æŸ¥è¯¢åºåˆ—å·
 req("AT+WISN?")
---²éÑ¯µ×²ãÈí¼þ°æ±¾ºÅ
---req("AT+VER")
---²éÑ¯IMEI
+--æŸ¥è¯¢IMEI
 req("AT+CGSN")
---Æô¶¯Õû·ÖÊ±ÖÓÍ¨Öª¶¨Ê±Æ÷
-startclktimer()
---×¢²á±¾Ä£¿é¹Ø×¢µÄÄÚ²¿ÏûÏ¢µÄ´¦Àíº¯Êý
-sys.regapp(ind,"SYS_WORKMODE_IND","UPDATE_BEGIN_IND","UPDATE_END_IND","DBG_BEGIN_IND","DBG_END_IND","NTP_BEGIN_IND","NTP_END_IND")
+req("AT+MUID?")
+setTimeReport()

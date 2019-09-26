@@ -1,608 +1,659 @@
---[[
-Ä£¿éÃû³Æ£º¶ÌĞÅ¹¦ÄÜ
-Ä£¿é¹¦ÄÜ£º¶ÌĞÅ·¢ËÍ£¬½ÓÊÕ£¬¶ÁÈ¡£¬É¾³ı
-Ä£¿é×îºóĞŞ¸ÄÊ±¼ä£º2017.02.13
-]]
+--- æ¨¡å—åŠŸèƒ½ï¼šçŸ­ä¿¡åŠŸèƒ½
+-- @module sms
+-- @author openLuat
+-- @license MIT
+-- @copyright openLuat
+-- @release 2018.03.25
 
---¶¨ÒåÄ£¿é,µ¼ÈëÒÀÀµ¿â
-local base = _G
-local string = require "string"
-local table = require "table"
-local sys = require "sys"
-local ril = require "ril"
-local common = require "common"
-local bit = require"bit"
-module("sms")
+require"sys"
+require"ril"
+require"common"
+require"utils"
+module(...,package.seeall)
 
---¼ÓÔØ³£ÓÃµÄÈ«¾Öº¯ÊıÖÁ±¾µØ
-local print = base.print
-local tonumber = base.tonumber
-local dispatch = sys.dispatch
+local publish = sys.publish
 local req = ril.request
 
---ready£ºµ×²ã¶ÌĞÅ¹¦ÄÜÊÇ·ñ×¼±¸¾ÍĞ÷
+--readyï¼šåº•å±‚çŸ­ä¿¡åŠŸèƒ½æ˜¯å¦å‡†å¤‡å°±ç»ª
 local ready,isn,tlongsms = false,255,{}
 local ssub,slen,sformat,smatch = string.sub,string.len,string.format,string.match
 local tsend={}
 
 --[[
-º¯ÊıÃû£º_send
-¹¦ÄÜ  £º·¢ËÍ¶ÌĞÅ(ÄÚ²¿½Ó¿Ú)
-²ÎÊı  £ºnum,ºÅÂë
-        data:¶ÌĞÅÄÚÈİ
-·µ»ØÖµ£ºtrue£º·¢ËÍ³É¹¦£¬false·¢ËÍÊ§°Ü
+å‡½æ•°åï¼šnumtobcdnum
+åŠŸèƒ½  ï¼šå·ç ASCIIå­—ç¬¦ä¸² è½¬åŒ–ä¸º BCDç¼–ç æ ¼å¼å­—ç¬¦ä¸²ï¼Œä»…æ”¯æŒæ•°å­—å’Œ+ï¼Œä¾‹å¦‚"+8618126324567" -> 91688121364265f7 ï¼ˆè¡¨ç¤ºç¬¬1ä¸ªå­—èŠ‚æ˜¯0x91ï¼Œç¬¬2ä¸ªå­—èŠ‚ä¸º0x68ï¼Œ......ï¼‰
+å‚æ•°  ï¼š
+		numï¼šå¾…è½¬æ¢å­—ç¬¦ä¸²
+è¿”å›å€¼ï¼šè½¬æ¢åçš„å­—ç¬¦ä¸²
+]]
+local function numtobcdnum(num)
+  local len, numfix,convnum = slen(num),"81",""
+
+  if ssub(num, 1,1) == "+" then
+    numfix = "91"
+    len = len-1
+    num = ssub(num, 2,-1)
+  end
+
+  if len%2 ~= 0 then --å¥‡æ•°ä½
+    for i=1, (len-(len%2))/2  do
+      convnum = convnum .. ssub(num, i*2,i*2) .. ssub(num, i*2-1,i*2-1)
+    end
+    convnum = convnum .. "F" .. ssub(num,len, len)
+  else--å¶æ•°ä½
+    for i=1, (len-(len%2))/2  do
+      convnum = convnum .. ssub(num, i*2,i*2) .. ssub(num, i*2-1,i*2-1)
+    end
+  end
+
+  return numfix .. convnum
+end
+
+--[[
+å‡½æ•°åï¼šbcdnumtonum
+åŠŸèƒ½  ï¼šBCDç¼–ç æ ¼å¼å­—ç¬¦ä¸² è½¬åŒ–ä¸º å·ç ASCIIå­—ç¬¦ä¸²ï¼Œä»…æ”¯æŒæ•°å­—å’Œ+ï¼Œä¾‹å¦‚91688121364265f7 ï¼ˆè¡¨ç¤ºç¬¬1ä¸ªå­—èŠ‚æ˜¯0x91ï¼Œç¬¬2ä¸ªå­—èŠ‚ä¸º0x68ï¼Œ......ï¼‰ -> "+8618126324567"
+å‚æ•°  ï¼š
+		numï¼šå¾…è½¬æ¢å­—ç¬¦ä¸²
+è¿”å›å€¼ï¼šè½¬æ¢åçš„å­—ç¬¦ä¸²
+]]
+local function bcdnumtonum(num)
+  local len, numfix,convnum = slen(num),"",""
+
+  if len%2 ~= 0 then
+    print("your bcdnum is err " .. num)
+    return
+  end
+
+  if ssub(num, 1,2) == "91" then
+    numfix = "+"
+  end
+
+  len,num = len-2,ssub(num, 3,-1)
+
+  for i=1, (len-(len%2))/2  do
+    convnum = convnum .. ssub(num, i*2,i*2) .. ssub(num, i*2-1,i*2-1)
+  end
+
+  if ssub(convnum,len,len) == "f"  or ssub(convnum,len,len) == "F" then
+    convnum = ssub(convnum, 1,-2)
+  end
+
+  return numfix .. convnum
+end
+
+
+--[[
+å‡½æ•°åï¼š_send
+åŠŸèƒ½  ï¼šå‘é€çŸ­ä¿¡(å†…éƒ¨æ¥å£)
+å‚æ•°  ï¼šnum,å·ç 
+        data:çŸ­ä¿¡å†…å®¹
+è¿”å›å€¼ï¼štrueï¼šå‘é€æˆåŠŸï¼Œfalseå‘é€å¤±è´¥
 ]]
 local function _send(num,data)
-	local numlen,datalen,pducnt,pdu,pdulen,udhi = sformat("%02X",slen(num)),slen(data)/2,1,"","",""
-	if not ready then return false end
-	
-    --Èç¹û·¢ËÍµÄÊı¾İ´óÓÚ140×Ö½ÚÔòÎª³¤¶ÌĞÅ
-	if datalen > 140 then
-        --¼ÆËã³ö³¤¶ÌĞÅ²ğ·ÖºóµÄ×ÜÌõÊı£¬³¤¶ÌĞÅµÄÃ¿°üµÄÊı¾İÊµ¼ÊÖ»ÓĞ134¸öÊµ¼ÊÒª·¢ËÍµÄ¶ÌĞÅÄÚÈİ£¬Êı¾İµÄÇ°6×Ö½ÚÎªĞ­ÒéÍ·
-		pducnt = sformat("%d",(datalen+133)/134)
-		pducnt = tonumber(pducnt)
-        --·ÖÅäÒ»¸öĞòÁĞºÅ£¬·¶Î§Îª0-255
-		isn = isn==255 and 0 or isn+1
-	end
+    local numlen,datalen,pducnt,pdu,pdulen,udhi = sformat("%02X",slen(num)),slen(data)/2,1,"","",""
+    if not ready then return false end
 
-    table.insert(tsend,{sval=pducnt,rval=0,flg=true})--sval·¢ËÍµÄ°üÊı£¬rvalÊÕµ½µÄ°üÊı
-	
-	if ssub(num,1,1) == "+" then
-		numlen = sformat("%02X",slen(num)-1)
-	end
-	
-	for i=1, pducnt do
-        --Èç¹ûÊÇ³¤¶ÌĞÅ
-		if pducnt > 1 then
-			local len_mul
-			len_mul = (i==pducnt and sformat("%02X",datalen-(pducnt-1)*134+6) or "8C")
-            --udhi£º6Î»Ğ­ÒéÍ·¸ñÊ½
-			udhi = "050003" .. sformat("%02X",isn) .. sformat("%02X",pducnt) .. sformat("%02X",i)
-			print(datalen, udhi)
-			pdu = "005110" .. numlen .. common.numtobcdnum(num) .. "000800" .. len_mul .. udhi .. ssub(data, (i-1)*134*2+1,i*134*2)
-        --·¢ËÍ¶Ì¶ÌĞÅ    
+    --å¦‚æœå‘é€çš„æ•°æ®å¤§äº140å­—èŠ‚åˆ™ä¸ºé•¿çŸ­ä¿¡
+    if datalen > 140 then
+        --è®¡ç®—å‡ºé•¿çŸ­ä¿¡æ‹†åˆ†åçš„æ€»æ¡æ•°ï¼Œé•¿çŸ­ä¿¡çš„æ¯åŒ…çš„æ•°æ®å®é™…åªæœ‰134ä¸ªå®é™…è¦å‘é€çš„çŸ­ä¿¡å†…å®¹ï¼Œæ•°æ®çš„å‰6å­—èŠ‚ä¸ºåè®®å¤´
+        pducnt = sformat("%d",(datalen+133)/134)
+        pducnt = tonumber(pducnt)
+        --åˆ†é…ä¸€ä¸ªåºåˆ—å·ï¼ŒèŒƒå›´ä¸º0-255
+        isn = isn==255 and 0 or isn+1
+    end
+
+    table.insert(tsend,{sval=pducnt,rval=0,flg=true})--svalå‘é€çš„åŒ…æ•°ï¼Œrvalæ”¶åˆ°çš„åŒ…æ•°
+
+    if ssub(num,1,1) == "+" then
+        numlen = sformat("%02X",slen(num)-1)
+    end
+
+    for i=1, pducnt do
+        --å¦‚æœæ˜¯é•¿çŸ­ä¿¡
+        if pducnt > 1 then
+            local len_mul
+            len_mul = (i==pducnt and sformat("%02X",datalen-(pducnt-1)*134+6) or "8C")
+            --udhiï¼š6ä½åè®®å¤´æ ¼å¼
+            udhi = "050003" .. sformat("%02X",isn) .. sformat("%02X",pducnt) .. sformat("%02X",i)
+            log.info(datalen, udhi)
+            pdu = "005110" .. numlen .. numtobcdnum(num) .. "000800" .. len_mul .. udhi .. ssub(data, (i-1)*134*2+1,i*134*2)
+        --å‘é€çŸ­çŸ­ä¿¡
         else
-			datalen = sformat("%02X",datalen)
-			pdu = "001110" .. numlen .. common.numtobcdnum(num) .. "000800" .. datalen .. data
-		end
-		pdulen = slen(pdu)/2-1
-		req(sformat("%s%s","AT+CMGS=",pdulen),pdu)
-	end
-	return true
+            datalen = sformat("%02X",datalen)
+            pdu = "001110" .. numlen .. numtobcdnum(num) .. "000800" .. datalen .. data
+        end
+        pdulen = slen(pdu)/2-1
+        req(sformat("%s%s","AT+CMGS=",pdulen),pdu)
+    end
+    return true
 end
 
 --[[
-º¯ÊıÃû£ºread
-¹¦ÄÜ  £º¶Á¶ÌĞÅ
-²ÎÊı  £ºpos¶ÌĞÅÎ»ÖÃ
-·µ»ØÖµ£ºtrue£º¶Á³É¹¦£¬false¶ÁÊ§°Ü
+å‡½æ•°åï¼šread
+åŠŸèƒ½  ï¼šè¯»çŸ­ä¿¡
+å‚æ•°  ï¼šposçŸ­ä¿¡ä½ç½®
+è¿”å›å€¼ï¼štrueï¼šè¯»æˆåŠŸï¼Œfalseè¯»å¤±è´¥
 ]]
 function read(pos)
-	if not ready or pos==ni or pos==0 then return false end
-	
-	req("AT+CMGR="..pos)
-	return true
+    if not ready or pos==ni or pos==0 then return false end
+
+    req("AT+CMGR="..pos)
+    return true
 end
 
 --[[
-º¯ÊıÃû£ºdelete
-¹¦ÄÜ  £ºÉ¾³ı¶ÌĞÅ
-²ÎÊı  £ºpos¶ÌĞÅÎ»ÖÃ
-·µ»ØÖµ£ºtrue£ºÉ¾³ı³É¹¦£¬falseÉ¾³ıÊ§°Ü
+å‡½æ•°åï¼šdelete
+åŠŸèƒ½  ï¼šåˆ é™¤çŸ­ä¿¡
+å‚æ•°  ï¼šposçŸ­ä¿¡ä½ç½®
+è¿”å›å€¼ï¼štrueï¼šåˆ é™¤æˆåŠŸï¼Œfalseåˆ é™¤å¤±è´¥
 ]]
 function delete(pos)
-	if not ready or pos==ni or pos==0 then return false end
-	req("AT+CMGD="..pos)
-	return true
+    if not ready or pos==nil or pos==0 then return false end
+    req("AT+CMGD="..pos)
+    return true
 end
 
 Charmap = {[0]=0x40,0xa3,0x24,0xa5,0xe8,0xE9,0xF9,0xEC,0xF2,0xC7,0x0A,0xD8,0xF8,0x0D,0xC5,0xE5
-		  ,0x0394,0x5F,0x03A6,0x0393,0x039B,0x03A9,0x03A0,0x03A8,0x03A3,0x0398,0x039E,0x1B,0xC6,0xE5,0xDF,0xA9
-		  ,0x20,0x21,0x22,0x23,0xA4,0x25,0x26,0x27,0x28,0x29,0x2A,0x2B,0x2C,0x2D,0x2E,0x2F
-		  ,0x30,0x31,0x32,0x33,0x34,0x35,0x36,0x37,0x38,0x39,0x3A,0x3B,0x3C,0x3D,0x3E,0x3F
-		  ,0xA1,0x41,0x42,0x43,0x44,0x45,0x46,0x47,0x48,0x49,0x4A,0x4B,0x4C,0x4D,0x4E,0x4F
-		  ,0X50,0x51,0x52,0x53,0x54,0x55,0x56,0x57,0x58,0x59,0x5A,0xC4,0xD6,0xD1,0xDC,0xA7
-		  ,0xBF,0x61,0x62,0x63,0x64,0x65,0x66,0x67,0x68,0x69,0x6A,0x6B,0x6C,0x6D,0x6E,0x6F
-		  ,0x70,0x71,0x72,0x73,0x74,0x75,0x76,0x77,0x78,0x79,0x7A,0xE4,0xF6,0xF1,0xFC,0xE0}
+          ,0x0394,0x5F,0x03A6,0x0393,0x039B,0x03A9,0x03A0,0x03A8,0x03A3,0x0398,0x039E,0x1B,0xC6,0xE5,0xDF,0xA9
+          ,0x20,0x21,0x22,0x23,0xA4,0x25,0x26,0x27,0x28,0x29,0x2A,0x2B,0x2C,0x2D,0x2E,0x2F
+          ,0x30,0x31,0x32,0x33,0x34,0x35,0x36,0x37,0x38,0x39,0x3A,0x3B,0x3C,0x3D,0x3E,0x3F
+          ,0xA1,0x41,0x42,0x43,0x44,0x45,0x46,0x47,0x48,0x49,0x4A,0x4B,0x4C,0x4D,0x4E,0x4F
+          ,0X50,0x51,0x52,0x53,0x54,0x55,0x56,0x57,0x58,0x59,0x5A,0xC4,0xD6,0xD1,0xDC,0xA7
+          ,0xBF,0x61,0x62,0x63,0x64,0x65,0x66,0x67,0x68,0x69,0x6A,0x6B,0x6C,0x6D,0x6E,0x6F
+          ,0x70,0x71,0x72,0x73,0x74,0x75,0x76,0x77,0x78,0x79,0x7A,0xE4,0xF6,0xF1,0xFC,0xE0}
 
 Charmapctl = {[10]=0x0C,[20]=0x5E,[40]=0x7B,[41]=0x7D,[47]=0x5C,[60]=0x5B,[61]=0x7E
-			 ,[62]=0x5D,[64]=0x7C,[101]=0xA4}
+             ,[62]=0x5D,[64]=0x7C,[101]=0xA4}
 
 --[[
-º¯ÊıÃû£ºgsm7bitdecode
-¹¦ÄÜ  £º7Î»±àÂë, ÔÚPDUÄ£Ê½ÖĞ£¬µ±Ê¹ÓÃ7Î»±àÂëÊ±£¬×î¶à¿É·¢160¸ö×Ö·û
-²ÎÊı  £ºdata
+å‡½æ•°åï¼šgsm7bitdecode
+åŠŸèƒ½  ï¼š7ä½ç¼–ç , åœ¨PDUæ¨¡å¼ä¸­ï¼Œå½“ä½¿ç”¨7ä½ç¼–ç æ—¶ï¼Œæœ€å¤šå¯å‘160ä¸ªå­—ç¬¦
+å‚æ•°  ï¼šdata
         longsms
-·µ»ØÖµ£º
+è¿”å›å€¼ï¼š
 ]]
 function gsm7bitdecode(data,longsms)
-	local ucsdata,lpcnt,tmpdata,resdata,nbyte,nleft,ucslen,olddat = "",slen(data)/2,0,0,0,0,0
-  
-	if longsms then
-		tmpdata = tonumber("0x" .. ssub(data,1,2))   
-		resdata = bit.rshift(tmpdata,1)
-		if olddat==27 then
-			if Charmapctl[resdata] then--ÌØÊâ×Ö·û
-				olddat,resdata = resdata,Charmapctl[resdata]
-				ucsdata = ssub(ucsdata,1,-5)
-			else
-				olddat,resdata = resdata,Charmap[resdata]
-			end
-		else
-			olddat,resdata = resdata,Charmap[resdata]
-		end
-		ucsdata = ucsdata .. sformat("%04X",resdata)
-	else
-		tmpdata = tonumber("0x" .. ssub(data,1,2))    
-		resdata = bit.band(bit.bor(bit.lshift(tmpdata,nbyte),nleft),0x7f)
-		if olddat==27 then
-			if Charmapctl[resdata] then--ÌØÊâ×Ö·û
-				olddat,resdata = resdata,Charmapctl[resdata]
-				ucsdata = ssub(ucsdata,1,-5)
-			else
-				olddat,resdata = resdata,Charmap[resdata]
-			end
-		else
-			olddat,resdata = resdata,Charmap[resdata]
-		end
-		ucsdata = ucsdata .. sformat("%04X",resdata)
-   
-		nleft = bit.rshift(tmpdata, 7-nbyte)
-		nbyte = nbyte+1
-		ucslen = ucslen+1
-	end
-  
-	for i=2, lpcnt do
-		tmpdata = tonumber("0x" .. ssub(data,(i-1)*2+1,i*2))   
-		if tmpdata == nil then break end 
-		resdata = bit.band(bit.bor(bit.lshift(tmpdata,nbyte),nleft),0x7f)
-		if olddat==27 then
-			if Charmapctl[resdata] then--ÌØÊâ×Ö·û
-				olddat,resdata = resdata,Charmapctl[resdata]
-				ucsdata = ssub(ucsdata,1,-5)
-			else
-				olddat,resdata = resdata,Charmap[resdata]
-			end
-		else
-			olddat,resdata = resdata,Charmap[resdata]
-		end
-		ucsdata = ucsdata .. sformat("%04X",resdata)
-   
-		nleft = bit.rshift(tmpdata, 7-nbyte)
-		nbyte = nbyte+1
-		ucslen = ucslen+1
-	
-		if nbyte == 7 then
-			if olddat==27 then
-				if Charmapctl[nleft] then--ÌØÊâ×Ö·û
-					olddat,nleft = nleft,Charmapctl[nleft]
-					ucsdata = ssub(ucsdata,1,-5)
-				else
-					olddat,nleft = nleft,Charmap[nleft]
-				end
-			else
-				olddat,nleft = nleft,Charmap[nleft]
-			end
-			ucsdata = ucsdata .. sformat("%04X",nleft)
-			nbyte,nleft = 0,0
-			ucslen = ucslen+1
-		end
-	end
-  
-	return ucsdata,ucslen
+    local ucsdata,lpcnt,tmpdata,resdata,nbyte,nleft,ucslen,olddat = "",slen(data)/2,0,0,0,0,0
+
+    if longsms then
+        tmpdata = tonumber("0x" .. ssub(data,1,2))
+        resdata = bit.rshift(tmpdata,1)
+        if olddat==27 then
+            if Charmapctl[resdata] then--ç‰¹æ®Šå­—ç¬¦
+                olddat,resdata = resdata,Charmapctl[resdata]
+                ucsdata = ssub(ucsdata,1,-5)
+            else
+                olddat,resdata = resdata,Charmap[resdata]
+            end
+        else
+            olddat,resdata = resdata,Charmap[resdata]
+        end
+        ucsdata = ucsdata .. sformat("%04X",resdata)
+    else
+        tmpdata = tonumber("0x" .. ssub(data,1,2))
+        resdata = bit.band(bit.bor(bit.lshift(tmpdata,nbyte),nleft),0x7f)
+        if olddat==27 then
+            if Charmapctl[resdata] then--ç‰¹æ®Šå­—ç¬¦
+                olddat,resdata = resdata,Charmapctl[resdata]
+                ucsdata = ssub(ucsdata,1,-5)
+            else
+                olddat,resdata = resdata,Charmap[resdata]
+            end
+        else
+            olddat,resdata = resdata,Charmap[resdata]
+        end
+        ucsdata = ucsdata .. sformat("%04X",resdata)
+
+        nleft = bit.rshift(tmpdata, 7-nbyte)
+        nbyte = nbyte+1
+        ucslen = ucslen+1
+    end
+
+    for i=2, lpcnt do
+        tmpdata = tonumber("0x" .. ssub(data,(i-1)*2+1,i*2))
+        if tmpdata == nil then break end
+        resdata = bit.band(bit.bor(bit.lshift(tmpdata,nbyte),nleft),0x7f)
+        if olddat==27 then
+            if Charmapctl[resdata] then--ç‰¹æ®Šå­—ç¬¦
+                olddat,resdata = resdata,Charmapctl[resdata]
+                ucsdata = ssub(ucsdata,1,-5)
+            else
+                olddat,resdata = resdata,Charmap[resdata]
+            end
+        else
+            olddat,resdata = resdata,Charmap[resdata]
+        end
+        ucsdata = ucsdata .. sformat("%04X",resdata)
+
+        nleft = bit.rshift(tmpdata, 7-nbyte)
+        nbyte = nbyte+1
+        ucslen = ucslen+1
+
+        if nbyte == 7 then
+            if olddat==27 then
+                if Charmapctl[nleft] then--ç‰¹æ®Šå­—ç¬¦
+                    olddat,nleft = nleft,Charmapctl[nleft]
+                    ucsdata = ssub(ucsdata,1,-5)
+                else
+                    olddat,nleft = nleft,Charmap[nleft]
+                end
+            else
+                olddat,nleft = nleft,Charmap[nleft]
+            end
+            ucsdata = ucsdata .. sformat("%04X",nleft)
+            nbyte,nleft = 0,0
+            ucslen = ucslen+1
+        end
+    end
+
+    return ucsdata,ucslen
 end
 
 --[[
-º¯ÊıÃû£ºgsm8bitdecode
-¹¦ÄÜ  £º8Î»±àÂë
-²ÎÊı  £ºdata
+å‡½æ•°åï¼šgsm8bitdecode
+åŠŸèƒ½  ï¼š8ä½ç¼–ç 
+å‚æ•°  ï¼šdata
         longsms
-·µ»ØÖµ£º
+è¿”å›å€¼ï¼š
 ]]
 function gsm8bitdecode(data)
-	local ucsdata,lpcnt = "",slen(data)/2
-   
-	for i=1, lpcnt do
-		ucsdata = ucsdata .. "00" .. ssub(data,(i-1)*2+1,i*2)
-	end
-   
-	return ucsdata,lpcnt
+    local ucsdata,lpcnt = "",slen(data)/2
+
+    for i=1, lpcnt do
+        ucsdata = ucsdata .. "00" .. ssub(data,(i-1)*2+1,i*2)
+    end
+
+    return ucsdata,lpcnt
 end
 
 --[[
-º¯ÊıÃû£ºrsp
-¹¦ÄÜ  £ºATÓ¦´ğ
-²ÎÊı  £ºcmd,success,response,intermediate
-·µ»ØÖµ£ºÎŞ
+å‡½æ•°åï¼šrsp
+åŠŸèƒ½  ï¼šATåº”ç­”
+å‚æ•°  ï¼šcmd,success,response,intermediate
+è¿”å›å€¼ï¼šæ— 
 ]]
 local function rsp(cmd,success,response,intermediate)
-	local prefix = smatch(cmd,"AT(%+%u+)")
-	print("lib_sms rsp",prefix,cmd,success,response,intermediate)
+    local prefix = smatch(cmd,"AT(%+%u+)")
+    log.info("lib_sms rsp",prefix,cmd,success,response,intermediate)
 
-    --¶Á¶ÌĞÅ³É¹¦
-	if prefix == "+CMGR" then
-		if not success then dispatch("SMS_READ_CNF") return end
-		local convnum,t,stat,alpha,len,pdu,data,longsms,total,isn,idx = "",""
-		if intermediate then
-			stat,alpha,len,pdu = smatch(intermediate,"+CMGR:%s*(%d),(.*),%s*(%d+)\r\n(%x+)")
-			len = tonumber(len)--PDUÊı¾İ³¤¶È£¬²»°üÀ¨¶ÌĞÅÏ¢ÖĞĞÄºÅÂë
-		end
-	
-        --ÊÕµ½µÄPDU°ü²»Îª¿ÕÔò½âÎöPDU°ü
-		if pdu and pdu ~= "" then
-			local offset,addlen,addnum,flag,dcs,tz,txtlen,fo=5     
-			pdu = ssub(pdu,(slen(pdu)/2-len)*2+1,-1)--PDUÊı¾İ£¬²»°üÀ¨¶ÌĞÅÏ¢ÖĞĞÄºÅÂë
-			fo = tonumber("0x" .. ssub(pdu,1,1))--PDU¶ÌĞÅÊ××Ö½ÚµÄ¸ß4Î»,µÚ6Î»ÎªÊı¾İ±¨Í·±êÖ¾Î»
-			if bit.band(fo, 0x4) ~= 0 then
-				longsms = true
-			end
-			addlen = tonumber(sformat("%d","0x"..ssub(pdu,3,4)))--»Ø¸´µØÖ·Êı×Ö¸öÊı 
-	  
-			addlen = addlen%2 == 0 and addlen+2 or addlen+3 --¼ÓÉÏºÅÂëÀàĞÍ2Î»£¨5£¬6£©or ¼ÓÉÏºÅÂëÀàĞÍ2Î»£¨5£¬6£©ºÍ1Î»F
-	  
-			offset = offset+addlen
-	  
-			addnum = ssub(pdu,5,5+addlen-1)
-			convnum = common.bcdnumtonum(addnum)
-	  
-			flag = tonumber(sformat("%d","0x"..ssub(pdu,offset,offset+1)))--Ğ­Òé±êÊ¶ (TP-PID) 
-			offset = offset+2
-			dcs = tonumber(sformat("%d","0x"..ssub(pdu,offset,offset+1)))--ÓÃ»§ĞÅÏ¢±àÂë·½Ê½ Dcs=8£¬±íÊ¾¶ÌĞÅ´æ·ÅµÄ¸ñÊ½ÎªUCS2±àÂë
-			offset = offset+2
-			tz = ssub(pdu,offset,offset+13)--Ê±Çø7¸ö×Ö½Ú
-			offset = offset+14
-			txtlen = tonumber(sformat("%d","0x"..ssub(pdu,offset,offset+1)))--¶ÌĞÅÎÄ±¾³¤¶È 
-			offset = offset+2
-			data = ssub(pdu,offset,offset+txtlen*2-1)--¶ÌĞÅÎÄ±¾
-			if longsms then
-				if tonumber("0x" .. ssub(data, 5,6))==3 then
-					isn,total,idx = tonumber("0x" .. ssub(data, 7,8)),tonumber("0x" .. ssub(data, 9,10)),tonumber("0x" .. ssub(data, 11,12))
-					data = ssub(data, 13,-1)--È¥µô±¨Í·6¸ö×Ö½Ú
-				elseif tonumber("0x" .. ssub(data, 5,6))==4 then
-					isn,total,idx = tonumber("0x" .. ssub(data, 7,10)),tonumber("0x" .. ssub(data, 11,12)),tonumber("0x" .. ssub(data, 13,14))
-					data = ssub(data, 15,-1)--È¥µô±¨Í·7¸ö×Ö½Ú
-				end
-			end
-	  
-			print("TP-PID : ",flag, "dcs: ", dcs, "tz: ",tz, "data: ",data,"txtlen",txtlen)
-	  
-			if dcs == 0x00 then--7bit encode
-				local newlen
-				data,newlen = gsm7bitdecode(data, longsms)
-				if newlen > txtlen then
-					data = ssub(data,1,txtlen*4)
-				end
-				print("7bit to ucs2 data: ",data,"txtlen",txtlen,"newlen",newlen)
-			elseif dcs == 0x04 then--8bit encode
-				data,txtlen = gsm8bitdecode(data)
-				print("8bit to ucs2 data: ",data,"txtlen",txtlen)
-			end
-  
-			for i=1, 7  do
-				t = t .. ssub(tz, i*2,i*2) .. ssub(tz, i*2-1,i*2-1)
-	  
-				if i<=3 then
-					t = i<3 and (t .. "/") or (t .. ",")
-				elseif i <= 6 then
-					t = i<6 and (t .. ":") or (t .. "+")
-				end
-			end
-		end
-	
-		local pos = smatch(cmd,"AT%+CMGR=(%d+)")
-		data = data or ""
-		alpha = alpha or ""
-		dispatch("SMS_READ_CNF",success,convnum,data,pos,t,alpha,total,idx,isn)
-	elseif prefix == "+CMGD" then
-		dispatch("SMS_DELETE_CNF",success)
-	elseif prefix == "+CMGS" then
-        --Èç¹ûÊÇ¶Ì¶ÌĞÅ£¬Ö±½Ó·¢ËÍ¶ÌĞÅÈ·ÈÏÏûÏ¢
+    --è¯»çŸ­ä¿¡æˆåŠŸ
+    if prefix == "+CMGR" then
+        if not success then publish("SMS_READ_CNF") return end
+        local convnum,t,stat,alpha,len,pdu,data,longsms,total,isn,idx = "",""
+        if intermediate then
+            stat,alpha,len,pdu = smatch(intermediate,"+CMGR:%s*(%d),(.*),%s*(%d+)\r\n(%x+)")
+            len = tonumber(len)--PDUæ•°æ®é•¿åº¦ï¼Œä¸åŒ…æ‹¬çŸ­ä¿¡æ¯ä¸­å¿ƒå·ç 
+        end
+
+        --æ”¶åˆ°çš„PDUåŒ…ä¸ä¸ºç©ºåˆ™è§£æPDUåŒ…
+        if pdu and pdu ~= "" then
+            local offset,addlen,addnum,flag,dcs,tz,txtlen,fo=5
+            pdu = ssub(pdu,(slen(pdu)/2-len)*2+1,-1)--PDUæ•°æ®ï¼Œä¸åŒ…æ‹¬çŸ­ä¿¡æ¯ä¸­å¿ƒå·ç 
+            fo = tonumber("0x" .. ssub(pdu,1,1))--PDUçŸ­ä¿¡é¦–å­—èŠ‚çš„é«˜4ä½,ç¬¬6ä½ä¸ºæ•°æ®æŠ¥å¤´æ ‡å¿—ä½
+            if bit.band(fo, 0x4) ~= 0 then
+                longsms = true
+            end
+            addlen = tonumber(sformat("%d","0x"..ssub(pdu,3,4)))--å›å¤åœ°å€æ•°å­—ä¸ªæ•°
+
+            addlen = addlen%2 == 0 and addlen+2 or addlen+3 --åŠ ä¸Šå·ç ç±»å‹2ä½ï¼ˆ5ï¼Œ6ï¼‰or åŠ ä¸Šå·ç ç±»å‹2ä½ï¼ˆ5ï¼Œ6ï¼‰å’Œ1ä½F
+
+            offset = offset+addlen
+
+            addnum = ssub(pdu,5,5+addlen-1)
+            convnum = bcdnumtonum(addnum)
+
+            flag = tonumber(sformat("%d","0x"..ssub(pdu,offset,offset+1)))--åè®®æ ‡è¯† (TP-PID)
+            offset = offset+2
+            dcs = tonumber(sformat("%d","0x"..ssub(pdu,offset,offset+1)))--ç”¨æˆ·ä¿¡æ¯ç¼–ç æ–¹å¼ Dcs=8ï¼Œè¡¨ç¤ºçŸ­ä¿¡å­˜æ”¾çš„æ ¼å¼ä¸ºUCS2ç¼–ç 
+            offset = offset+2
+            tz = ssub(pdu,offset,offset+13)--æ—¶åŒº7ä¸ªå­—èŠ‚
+            offset = offset+14
+            txtlen = tonumber(sformat("%d","0x"..ssub(pdu,offset,offset+1)))--çŸ­ä¿¡æ–‡æœ¬é•¿åº¦
+            offset = offset+2
+            data = ssub(pdu,offset,offset+txtlen*2-1)--çŸ­ä¿¡æ–‡æœ¬
+            if longsms then
+                if tonumber("0x" .. ssub(data, 5,6))==3 then
+                    isn,total,idx = tonumber("0x" .. ssub(data, 7,8)),tonumber("0x" .. ssub(data, 9,10)),tonumber("0x" .. ssub(data, 11,12))
+                    data = ssub(data, 13,-1)--å»æ‰æŠ¥å¤´6ä¸ªå­—èŠ‚
+                elseif tonumber("0x" .. ssub(data, 5,6))==4 then
+                    isn,total,idx = tonumber("0x" .. ssub(data, 7,10)),tonumber("0x" .. ssub(data, 11,12)),tonumber("0x" .. ssub(data, 13,14))
+                    data = ssub(data, 15,-1)--å»æ‰æŠ¥å¤´7ä¸ªå­—èŠ‚
+                end
+            end
+
+            log.info("TP-PID : ",flag, "dcs: ", dcs, "tz: ",tz, "data: ",data,"txtlen",txtlen)
+
+            if dcs == 0x00 then--7bit encode
+                local newlen
+                data,newlen = gsm7bitdecode(data, longsms)
+                if newlen > txtlen then
+                    data = ssub(data,1,txtlen*4)
+                end
+                log.info("7bit to ucs2 data: ",data,"txtlen",txtlen,"newlen",newlen)
+            elseif dcs == 0x04 then--8bit encode
+                data,txtlen = gsm8bitdecode(data)
+                log.info("8bit to ucs2 data: ",data,"txtlen",txtlen)
+            end
+
+            for i=1, 7  do
+                t = t .. ssub(tz, i*2,i*2) .. ssub(tz, i*2-1,i*2-1)
+
+                if i<=3 then
+                    t = i<3 and (t .. "/") or (t .. ",")
+                elseif i <= 6 then
+                    t = i<6 and (t .. ":") or (t .. "+")
+                end
+            end
+        end
+
+        local pos = smatch(cmd,"AT%+CMGR=(%d+)")
+        data = data or ""
+        alpha = alpha or ""
+        publish("SMS_READ_CNF",success,convnum,data,pos,t,alpha,total,idx,isn)
+    elseif prefix == "+CMGD" then
+        publish("SMS_DELETE_CNF",success)
+    elseif prefix == "+CMGS" then
+        --å¦‚æœæ˜¯çŸ­çŸ­ä¿¡ï¼Œç›´æ¥å‘é€çŸ­ä¿¡ç¡®è®¤æ¶ˆæ¯
         if tsend[1].sval == 1 then--{sval=pducnt,rval=0,flg=true}
             table.remove(tsend,1)
-            dispatch("SMS_SEND_CNF",success)
-        --Èç¹ûÊÇ³¤¶ÌĞÅ£¬ËùÓĞcmgsÖ®ºó£¬²ÅÅ×³öSMS_SEND_CNF,ËùÓĞcmgs¶¼³É¹¦£¬²Åtrue£¬ÆäÓà¶¼ÊÇfalse
+            publish("SMS_SEND_CNF",success)
+        --å¦‚æœæ˜¯é•¿çŸ­ä¿¡ï¼Œæ‰€æœ‰cmgsä¹‹åï¼Œæ‰æŠ›å‡ºSMS_SEND_CNF,æ‰€æœ‰cmgséƒ½æˆåŠŸï¼Œæ‰trueï¼Œå…¶ä½™éƒ½æ˜¯false
         else
             tsend[1].rval=tsend[1].rval+1
-            --Ö»ÒªÆäÖĞÓĞ·¢ËÍÊ§°ÜµÄ¶ÌĞÅ£¬ÔòÕû¸ö³¤¶ÌĞÅ½«±ê¼ÇÎª·¢ËÍÊ§°Ü
+            --åªè¦å…¶ä¸­æœ‰å‘é€å¤±è´¥çš„çŸ­ä¿¡ï¼Œåˆ™æ•´ä¸ªé•¿çŸ­ä¿¡å°†æ ‡è®°ä¸ºå‘é€å¤±è´¥
             if not success then tsend[1].flg=false end
             if tsend[1].sval == tsend[1].rval then
-                dispatch("SMS_SEND_CNF",tsend[1].flg)
+                publish("SMS_SEND_CNF",tsend[1].flg)
                 table.remove(tsend,1)
             end
         end
-	end
+    end
 end
 
 --[[
-º¯ÊıÃû£ºurc
-¹¦ÄÜ  £ºÖ÷¶¯ÉÏ±¨ÏûÏ¢´¦Àíº¯Êı
-²ÎÊı  £ºdata,prefix
-·µ»ØÖµ£ºÎŞ
+å‡½æ•°åï¼šurc
+åŠŸèƒ½  ï¼šä¸»åŠ¨ä¸ŠæŠ¥æ¶ˆæ¯å¤„ç†å‡½æ•°
+å‚æ•°  ï¼šdata,prefix
+è¿”å›å€¼ï¼šæ— 
 ]]
 local function urc(data,prefix)
-    --¶ÌĞÅ×¼±¸ºÃ
-	if data == "SMS READY" then
-		--req("AT+CSMP=17,167,0,8")--ÉèÖÃ¶ÌĞÅTEXT Ä£Ê½²ÎÊı
-        --Ê¹ÓÃPDUÄ£Ê½·¢ËÍ
-		req("AT+CMGF=0")
-        --ÉèÖÃATÃüÁîµÄ×Ö·û±àÂëÊÇUCS2
-		req("AT+CSCS=\"UCS2\"")
-        --·Ö·¢¶ÌĞÅ×¼±¸ºÃÏûÏ¢
-		dispatch("SMS_READY")
-	elseif prefix == "+CMTI" then
-        --ÌáÈ¡¶ÌĞÅÎ»ÖÃ
-		local pos = smatch(data,"(%d+)",slen(prefix)+1)
-        --·Ö·¢ÊÕµ½ĞÂ¶ÌĞÅÏûÏ¢
-		dispatch("SMS_NEW_MSG_IND",pos)
-	end
+    --çŸ­ä¿¡å‡†å¤‡å¥½
+    if data == "SMS READY" then
+        --req("AT+CSMP=17,167,0,8")--è®¾ç½®çŸ­ä¿¡TEXT æ¨¡å¼å‚æ•°
+        --ä½¿ç”¨PDUæ¨¡å¼å‘é€
+        req("AT+CMGF=0")
+        --è®¾ç½®ATå‘½ä»¤çš„å­—ç¬¦ç¼–ç æ˜¯UCS2
+        req("AT+CSCS=\"UCS2\"")
+        --åˆ†å‘çŸ­ä¿¡å‡†å¤‡å¥½æ¶ˆæ¯
+        publish("SMS_READY")
+        --æ¸…ç©ºå·²è¯»çŸ­ä¿¡
+        ril.request("AT+CMGD=1,3")
+    elseif prefix == "+CMTI" then
+        --æå–çŸ­ä¿¡ä½ç½®
+        local pos = smatch(data,"(%d+)",slen(prefix)+1)
+        --åˆ†å‘æ”¶åˆ°æ–°çŸ­ä¿¡æ¶ˆæ¯
+        publish("SMS_NEW_MSG_IND",pos)
+    end
 end
 
 --[[
-º¯ÊıÃû£ºgetsmsstate
-¹¦ÄÜ  £º»ñÈ¡¶ÌÏûÏ¢ÊÇ·ñ×¼±¸ºÃµÄ×´Ì¬
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºtrue×¼±¸ºÃ£¬ÆäËûÖµ£ºÎ´×¼±¸ºÃ
+å‡½æ•°åï¼šgetsmsstate
+åŠŸèƒ½  ï¼šè·å–çŸ­æ¶ˆæ¯æ˜¯å¦å‡†å¤‡å¥½çš„çŠ¶æ€
+å‚æ•°  ï¼šæ— 
+è¿”å›å€¼ï¼štrueå‡†å¤‡å¥½ï¼Œå…¶ä»–å€¼ï¼šæœªå‡†å¤‡å¥½
 ]]
 function getsmsstate()
-	return ready
+    return ready
 end
 
 --[[
-º¯ÊıÃû£ºmergelongsms
-¹¦ÄÜ  £ººÏ²¢³¤¶ÌĞÅ
-²ÎÊı  £º
-		tag£º³¤¶ÌĞÅ±ê¼Ç(ISNºÍ×ÜÌõÊıµÄÆ´½Ó×Ö·û´®)
-·µ»ØÖµ£ºÎŞ
+å‡½æ•°åï¼šmergelongsms
+åŠŸèƒ½  ï¼šåˆå¹¶é•¿çŸ­ä¿¡
+å‚æ•°  ï¼š
+        tagï¼šé•¿çŸ­ä¿¡æ ‡è®°(ISNå’Œæ€»æ¡æ•°çš„æ‹¼æ¥å­—ç¬¦ä¸²)
+è¿”å›å€¼ï¼šæ— 
 ]]
 local function mergelongsms(tag)
-	local data=""
-    --°´±íÖĞµÄË³Ğò£¬Ò»´ÎÆ´½Ó¶ÌÏûÏ¢ÄÚÈİ
-	for i=1,tlongsms[tag]["total"] do
-		data = data .. (tlongsms[tag]["dat"][i] or "")
-	end
-    --·Ö·¢³¤¶ÌĞÅºÏ²¢È·ÈÏÏûÏ¢
-	sys.dispatch("LONG_SMS_MERGR_CNF",true,tlongsms[tag]["num"],data,tlongsms[tag]["t"],tlongsms[tag]["nam"])
-	print("mergelongsms", "num:",tlongsms[tag]["num"], "data", data)
-	tlongsms[tag]["dat"],tlongsms[tag] = nil
+    local data=""
+    --æŒ‰è¡¨ä¸­çš„é¡ºåºï¼Œä¸€æ¬¡æ‹¼æ¥çŸ­æ¶ˆæ¯å†…å®¹
+    for i=1,tlongsms[tag]["total"] do
+        data = data .. (tlongsms[tag]["dat"][i] or "")
+    end
+    --åˆ†å‘é•¿çŸ­ä¿¡åˆå¹¶ç¡®è®¤æ¶ˆæ¯
+    publish("LONG_SMS_MERGR_CNF",true,tlongsms[tag]["num"],data,tlongsms[tag]["t"],tlongsms[tag]["nam"])
+    log.info("mergelongsms", "num:",tlongsms[tag]["num"], "data", data)
+    tlongsms[tag]["dat"],tlongsms[tag] = nil
 end
 
 --[[
-º¯ÊıÃû£ºlongsmsind
-¹¦ÄÜ  £º³¤¶ÌĞÅ±»²ğ½âºóµÄÏûÏ¢°üÉÏ±¨
-²ÎÊı  £ºid,num, data,datetime,name,total,idx,isn
-·µ»ØÖµ£ºÎŞ
+å‡½æ•°åï¼šlongsmsind
+åŠŸèƒ½  ï¼šé•¿çŸ­ä¿¡è¢«æ‹†è§£åçš„æ¶ˆæ¯åŒ…ä¸ŠæŠ¥
+å‚æ•°  ï¼šid,num, data,datetime,name,total,idx,isn
+è¿”å›å€¼ï¼šæ— 
 ]]
-local function longsmsind(id,num, data,datetime,name,total,idx,isn)
-	print("longsmsind", "isn",isn,"total:",total, "idx:",idx,"data", data)
-	
-	if tlongsms[isn..total] then
-		if not tlongsms[isn..total]["dat"] then tlongsms[isn..total]["dat"]={} end
-		tlongsms[isn..total]["dat"][idx] = data
-	else
-		tlongsms[isn..total] = {}
-		tlongsms[isn..total]["total"],tlongsms[isn..total]["num"],tlongsms[isn..total]["t"],tlongsms[isn..total]["nam"]=total,num,datetime,name
-		tlongsms[isn..total]["dat"]={}
-		tlongsms[isn..total]["dat"][idx] = data
-	end
+local function longsmsind(num, data,datetime,name,total,idx,isn)
+    log.info("longsmsind", "isn",isn,"total:",total, "idx:",idx,"data", data)
 
-	local totalrcv = 0
-	for i=1,tlongsms[isn..total]["total"] do
-		if tlongsms[isn..total]["dat"][i] then totalrcv=totalrcv+1 end
-	end
-	--³¤¶ÌĞÅ½ÓÊÕÍêÕû
-	if tlongsms[isn..total]["total"]==totalrcv then
-		sys.timer_stop(mergelongsms,isn..total)
-		mergelongsms(isn..total)
-	else
-		--Èç¹û2·ÖÖÓºó³¤¶ÌĞÅ»¹Ã»ÊÕÍêÕû£¬2·ÖÖÓºó½«×Ô¶¯ºÏ²¢ÒÑÊÕµ½µÄ³¤¶ÌĞÅ
-		sys.timer_start(mergelongsms,120000,isn..total)
-	end    
+    if tlongsms[isn..total] then
+        if not tlongsms[isn..total]["dat"] then tlongsms[isn..total]["dat"]={} end
+        tlongsms[isn..total]["dat"][idx] = data
+    else
+        tlongsms[isn..total] = {}
+        tlongsms[isn..total]["total"],tlongsms[isn..total]["num"],tlongsms[isn..total]["t"],tlongsms[isn..total]["nam"]=total,num,datetime,name
+        tlongsms[isn..total]["dat"]={}
+        tlongsms[isn..total]["dat"][idx] = data
+    end
+
+    local totalrcv = 0
+    for i=1,tlongsms[isn..total]["total"] do
+        if tlongsms[isn..total]["dat"][i] then totalrcv=totalrcv+1 end
+    end
+    --é•¿çŸ­ä¿¡æ¥æ”¶å®Œæ•´
+    if tlongsms[isn..total]["total"]==totalrcv then
+        sys.timerStop(mergelongsms,isn..total)
+        mergelongsms(isn..total)
+    else
+        --å¦‚æœ2åˆ†é’Ÿåé•¿çŸ­ä¿¡è¿˜æ²¡æ”¶å®Œæ•´ï¼Œ2åˆ†é’Ÿåå°†è‡ªåŠ¨åˆå¹¶å·²æ”¶åˆ°çš„é•¿çŸ­ä¿¡
+        sys.timerStart(mergelongsms,120000,isn..total)
+    end
 end
 
---×¢²á³¤¶ÌĞÅºÏ²¢´¦Àíº¯Êı
-sys.regapp(longsmsind,"LONG_SMS_MERGE")
+--æ³¨å†Œé•¿çŸ­ä¿¡åˆå¹¶å¤„ç†å‡½æ•°
+sys.subscribe("LONG_SMS_MERGE",longsmsind)
 
-ril.regurc("SMS READY",urc)
-ril.regurc("+CMT",urc)
-ril.regurc("+CMTI",urc)
+ril.regUrc("SMS READY",urc)
+ril.regUrc("+CMT",urc)
+ril.regUrc("+CMTI",urc)
 
-ril.regrsp("+CMGR",rsp)
-ril.regrsp("+CMGD",rsp)
-ril.regrsp("+CMGS",rsp)
+ril.regRsp("+CMGR",rsp)
+ril.regRsp("+CMGD",rsp)
+ril.regRsp("+CMGS",rsp)
 
---Ä¬ÈÏÉÏ±¨ĞÂ¶ÌĞÅ´æ´¢Î»ÖÃ
+--é»˜è®¤ä¸ŠæŠ¥æ–°çŸ­ä¿¡å­˜å‚¨ä½ç½®
 --req("AT+CNMI=2,1")
---Ê¹ÓÃPDUÄ£Ê½·¢ËÍ
+--ä½¿ç”¨PDUæ¨¡å¼å‘é€
 req("AT+CMGF=0")
 req("AT+CSMP=17,167,0,8")
---ÉèÖÃATÃüÁîµÄ×Ö·û±àÂëÊÇUCS2
+--è®¾ç½®ATå‘½ä»¤çš„å­—ç¬¦ç¼–ç æ˜¯UCS2
 req("AT+CSCS=\"UCS2\"")
---ÉèÖÃ´æ´¢ÇøÎªSIM
+--è®¾ç½®å­˜å‚¨åŒºä¸ºSIM
 req("AT+CPMS=\"SM\"")
 req('AT+CNMI=2,1')
 
 
 
 
---¶ÌĞÅ·¢ËÍ»º³å±í×î´ó¸öÊı
+--çŸ­ä¿¡å‘é€ç¼“å†²è¡¨æœ€å¤§ä¸ªæ•°
 local SMS_SEND_BUF_MAX_CNT = 10
---¶ÌĞÅ·¢ËÍ¼ä¸ô£¬µ¥Î»ºÁÃë
+--çŸ­ä¿¡å‘é€é—´éš”ï¼Œå•ä½æ¯«ç§’
 local SMS_SEND_INTERVAL = 3000
---¶ÌĞÅ·¢ËÍ»º³å±í
+--çŸ­ä¿¡å‘é€ç¼“å†²è¡¨
 local tsmsnd = {}
 
 --[[
-º¯ÊıÃû£ºsndnxt
-¹¦ÄÜ  £º·¢ËÍ¶ÌĞÅ·¢ËÍ»º³å±íÖĞµÄµÚÒ»Ìõ¶ÌĞÅ
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
+å‡½æ•°åï¼šsndnxt
+åŠŸèƒ½  ï¼šå‘é€çŸ­ä¿¡å‘é€ç¼“å†²è¡¨ä¸­çš„ç¬¬ä¸€æ¡çŸ­ä¿¡
+å‚æ•°  ï¼šæ— 
+è¿”å›å€¼ï¼šæ— 
 ]]
 local function sndnxt()
-	if #tsmsnd>0 then
-		_send(tsmsnd[1].num,tsmsnd[1].data)
-	end
+    if #tsmsnd>0 then
+        _send(tsmsnd[1].num,tsmsnd[1].data)
+    end
 end
 
 --[[
-º¯ÊıÃû£ºsendcnf
-¹¦ÄÜ  £ºSMS_SEND_CNFÏûÏ¢µÄ´¦Àíº¯Êı£¬Òì²½Í¨Öª¶ÌĞÅ·¢ËÍ½á¹û
-²ÎÊı  £º
-        result£º¶ÌĞÅ·¢ËÍ½á¹û£¬trueÎª³É¹¦£¬false»òÕßnilÎªÊ§°Ü
-·µ»ØÖµ£ºÎŞ
+å‡½æ•°åï¼šsendcnf
+åŠŸèƒ½  ï¼šSMS_SEND_CNFæ¶ˆæ¯çš„å¤„ç†å‡½æ•°ï¼Œå¼‚æ­¥é€šçŸ¥çŸ­ä¿¡å‘é€ç»“æœ
+å‚æ•°  ï¼š
+        resultï¼šçŸ­ä¿¡å‘é€ç»“æœï¼Œtrueä¸ºæˆåŠŸï¼Œfalseæˆ–è€…nilä¸ºå¤±è´¥
+è¿”å›å€¼ï¼šæ— 
 ]]
 local function sendcnf(result)
-	print("sendcnf",result)
-	local num,data,cb = tsmsnd[1].num,tsmsnd[1].data,tsmsnd[1].cb
-	--´Ó¶ÌĞÅ·¢ËÍ»º³å±íÖĞÒÆ³ıµ±Ç°¶ÌĞÅ
-	table.remove(tsmsnd,1)
-	--Èç¹ûÓĞ·¢ËÍ»Øµ÷º¯Êı£¬Ö´ĞĞ»Øµ÷
-	if cb then cb(result,num,data) end
-	--Èç¹û¶ÌĞÅ·¢ËÍ»º³å±íÖĞ»¹ÓĞ¶ÌĞÅ£¬ÔòSMS_SEND_INTERVALºÁÃëºó£¬¼ÌĞø·¢ËÍÏÂÌõ¶ÌĞÅ
-	if #tsmsnd>0 then sys.timer_start(sndnxt,SMS_SEND_INTERVAL) end
+    log.info("sendcnf",result)
+    local num,data,cb = tsmsnd[1].num,tsmsnd[1].data,tsmsnd[1].cb
+    --ä»çŸ­ä¿¡å‘é€ç¼“å†²è¡¨ä¸­ç§»é™¤å½“å‰çŸ­ä¿¡
+    table.remove(tsmsnd,1)
+    --å¦‚æœæœ‰å‘é€å›è°ƒå‡½æ•°ï¼Œæ‰§è¡Œå›è°ƒ
+    if cb then cb(result,num,data) end
+    --å¦‚æœçŸ­ä¿¡å‘é€ç¼“å†²è¡¨ä¸­è¿˜æœ‰çŸ­ä¿¡ï¼Œåˆ™SMS_SEND_INTERVALæ¯«ç§’åï¼Œç»§ç»­å‘é€ä¸‹æ¡çŸ­ä¿¡
+    if #tsmsnd>0 then sys.timerStart(sndnxt,SMS_SEND_INTERVAL) end
 end
 
---[[
-º¯ÊıÃû£ºsend
-¹¦ÄÜ  £º·¢ËÍ¶ÌĞÅ
-²ÎÊı  £º
-        num£º¶ÌĞÅ½ÓÊÕ·½ºÅÂë£¬ASCIIÂë×Ö·û´®¸ñÊ½
-		data£º¶ÌĞÅÄÚÈİ£¬GB2312±àÂëµÄ×Ö·û´®
-		cb£º¶ÌĞÅ·¢ËÍ½á¹ûÒì²½·µ»ØÊ±Ê¹ÓÃµÄ»Øµ÷º¯Êı£¬¿ÉÑ¡
-		idx£º²åÈë¶ÌĞÅ·¢ËÍ»º³å±íµÄÎ»ÖÃ£¬¿ÉÑ¡£¬Ä¬ÈÏÊÇ²åÈëÄ©Î²
-·µ»ØÖµ£º·µ»Øtrue£¬±íÊ¾µ÷ÓÃ½Ó¿Ú³É¹¦£¨²¢²»ÊÇ¶ÌĞÅ·¢ËÍ³É¹¦£¬¶ÌĞÅ·¢ËÍ½á¹û£¬Í¨¹ısendcnf·µ»Ø£¬Èç¹ûÓĞcb£¬»áÍ¨Öªcbº¯Êı£©£»·µ»Øfalse£¬±íÊ¾µ÷ÓÃ½Ó¿ÚÊ§°Ü
-]]
-function send(num,data,cb,idx)
-	--ºÅÂë»òÕßÄÚÈİ·Ç·¨
-	if not num or num=="" or not data or data=="" then return end
-	--¶ÌĞÅ·¢ËÍ»º³å±íÒÑÂú
-	if #tsmsnd>=SMS_SEND_BUF_MAX_CNT then return end
-	local dat = common.binstohexs(common.gb2312toucs2be(data))
-	--Èç¹ûÖ¸¶¨ÁË²åÈëÎ»ÖÃ
-	if idx then
-		table.insert(tsmsnd,idx,{num=num,data=dat,cb=cb})
-	--Ã»ÓĞÖ¸¶¨²åÈëÎ»ÖÃ£¬²åÈëµ½Ä©Î²
-	else
-		table.insert(tsmsnd,{num=num,data=dat,cb=cb})
-	end
-	--Èç¹û¶ÌĞÅ·¢ËÍ»º³å±íÖĞÖ»ÓĞÒ»Ìõ¶ÌĞÅ£¬Á¢¼´´¥·¢¶ÌĞÅ·¢ËÍ¶¯×÷
-	if #tsmsnd==1 then _send(num,dat) return true end
+--- å‘é€çŸ­ä¿¡
+-- @string numï¼ŒçŸ­ä¿¡æ¥æ”¶æ–¹å·ç ï¼ŒASCIIç å­—ç¬¦ä¸²æ ¼å¼
+-- @string dataï¼ŒçŸ­ä¿¡å†…å®¹ï¼ŒGB2312ç¼–ç çš„å­—ç¬¦ä¸²
+-- @function[opt=nil] cbFncï¼ŒçŸ­ä¿¡å‘é€ç»“æœå¼‚æ­¥è¿”å›æ—¶çš„ç”¨æˆ·å›è°ƒå‡½æ•°ï¼Œå›è°ƒå‡½æ•°çš„è°ƒç”¨å½¢å¼ä¸ºï¼š
+--              cbFnc(result,num,data)
+--              numï¼šçŸ­ä¿¡æ¥æ”¶æ–¹çš„å·ç ï¼ŒASCIIç å­—ç¬¦ä¸²æ ¼å¼
+--              dataï¼šçŸ­ä¿¡å†…å®¹ï¼ŒGB2312ç¼–ç çš„å­—ç¬¦ä¸²
+-- @number[opt=nil] idxï¼Œæ’å…¥çŸ­ä¿¡å‘é€ç¼“å†²è¡¨çš„ä½ç½®ï¼Œé»˜è®¤æ˜¯æ’å…¥æœ«å°¾
+-- @return resultï¼Œtrueè¡¨ç¤ºè°ƒç”¨æ¥å£æˆåŠŸï¼ˆå¹¶ä¸æ˜¯çŸ­ä¿¡å‘é€æˆåŠŸï¼ŒçŸ­ä¿¡å‘é€ç»“æœï¼Œé€šè¿‡sendcnfè¿”å›ï¼Œå¦‚æœæœ‰cbFncï¼Œä¼šé€šçŸ¥cbFncå‡½æ•°ï¼‰ï¼›è¿”å›falseï¼Œè¡¨ç¤ºè°ƒç”¨æ¥å£å¤±è´¥
+-- @usage sms.send("10086","test",cbFnc)
+function send(num,data,cbFnc,idx)
+    --å·ç æˆ–è€…å†…å®¹éæ³•
+    if not num or num=="" or not data or data=="" then if cbFnc then cbFnc(false,num,data) end return end
+    --çŸ­ä¿¡å‘é€ç¼“å†²è¡¨å·²æ»¡
+    if #tsmsnd>=SMS_SEND_BUF_MAX_CNT then if cbFnc then cbFnc(false,num,data) end return end
+    local dat = string.toHex(common.gb2312ToUcs2be(data))
+    --å¦‚æœæŒ‡å®šäº†æ’å…¥ä½ç½®
+    if idx then
+        table.insert(tsmsnd,idx,{num=num,data=dat,cb=cbFnc})
+    --æ²¡æœ‰æŒ‡å®šæ’å…¥ä½ç½®ï¼Œæ’å…¥åˆ°æœ«å°¾
+    else
+        table.insert(tsmsnd,{num=num,data=dat,cb=cbFnc})
+    end
+    --å¦‚æœçŸ­ä¿¡å‘é€ç¼“å†²è¡¨ä¸­åªæœ‰ä¸€æ¡çŸ­ä¿¡ï¼Œç«‹å³è§¦å‘çŸ­ä¿¡å‘é€åŠ¨ä½œ
+    if #tsmsnd==1 then _send(num,dat) return true end
 end
 
 
---¶ÌĞÅ½ÓÊÕÎ»ÖÃ±í
+--çŸ­ä¿¡æ¥æ”¶ä½ç½®è¡¨
 local tnewsms = {}
 
 --[[
-º¯ÊıÃû£ºreadsms
-¹¦ÄÜ  £º¶ÁÈ¡¶ÌĞÅ½ÓÊÕÎ»ÖÃ±íÖĞµÄµÚÒ»Ìõ¶ÌĞÅ
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
+å‡½æ•°åï¼šreadsms
+åŠŸèƒ½  ï¼šè¯»å–çŸ­ä¿¡æ¥æ”¶ä½ç½®è¡¨ä¸­çš„ç¬¬ä¸€æ¡çŸ­ä¿¡
+å‚æ•°  ï¼šæ— 
+è¿”å›å€¼ï¼šæ— 
 ]]
 local function readsms()
-	if #tnewsms ~= 0 then
-		read(tnewsms[1])
-	end
+    if #tnewsms ~= 0 then
+        read(tnewsms[1])
+    end
 end
 
 --[[
-º¯ÊıÃû£ºnewsms
-¹¦ÄÜ  £ºSMS_NEW_MSG_IND£¨Î´¶Á¶ÌĞÅ»òÕßĞÂ¶ÌĞÅÖ÷¶¯ÉÏ±¨µÄÏûÏ¢£©ÏûÏ¢µÄ´¦Àíº¯Êı
-²ÎÊı  £º
-        pos£º¶ÌĞÅ´æ´¢Î»ÖÃ
-·µ»ØÖµ£ºÎŞ
+å‡½æ•°åï¼šnewsms
+åŠŸèƒ½  ï¼šSMS_NEW_MSG_INDï¼ˆæœªè¯»çŸ­ä¿¡æˆ–è€…æ–°çŸ­ä¿¡ä¸»åŠ¨ä¸ŠæŠ¥çš„æ¶ˆæ¯ï¼‰æ¶ˆæ¯çš„å¤„ç†å‡½æ•°
+å‚æ•°  ï¼š
+        posï¼šçŸ­ä¿¡å­˜å‚¨ä½ç½®
+è¿”å›å€¼ï¼šæ— 
 ]]
 local function newsms(pos)
-	--´æ´¢Î»ÖÃ²åÈëµ½¶ÌĞÅ½ÓÊÕÎ»ÖÃ±íÖĞ
-	table.insert(tnewsms,pos)
-	--Èç¹ûÖ»ÓĞÒ»Ìõ¶ÌĞÅ£¬ÔòÁ¢¼´¶ÁÈ¡
-	if #tnewsms == 1 then
-		readsms()
-	end
+    --å­˜å‚¨ä½ç½®æ’å…¥åˆ°çŸ­ä¿¡æ¥æ”¶ä½ç½®è¡¨ä¸­
+    table.insert(tnewsms,pos)
+    --å¦‚æœåªæœ‰ä¸€æ¡çŸ­ä¿¡ï¼Œåˆ™ç«‹å³è¯»å–
+    if #tnewsms == 1 then
+        readsms()
+    end
 end
 
---ĞÂ¶ÌĞÅµÄÓÃ»§´¦Àíº¯Êı
+--æ–°çŸ­ä¿¡çš„ç”¨æˆ·å¤„ç†å‡½æ•°
 local newsmscb
---[[
-º¯ÊıÃû£ºregnewsmscb
-¹¦ÄÜ  £º×¢²áĞÂ¶ÌĞÅµÄÓÃ»§´¦Àíº¯Êı
-²ÎÊı  £º
-        cb£ºÓÃ»§´¦Àíº¯ÊıÃû
-·µ»ØÖµ£ºÎŞ
-]]
-function regnewsmscb(cb)
-	newsmscb = cb
+
+--- è®¾ç½®æ–°çŸ­ä¿¡çš„ç”¨æˆ·å¤„ç†å‡½æ•°
+-- @function cbFncï¼Œæ–°çŸ­ä¿¡çš„ç”¨æˆ·å¤„ç†å‡½æ•°
+-- @return nil
+-- @usage sms.setNewSmsCb(cbFnc)
+function setNewSmsCb(cbFnc)
+    newsmscb = cbFnc
 end
 
 --[[
-º¯ÊıÃû£ºreadcnf
-¹¦ÄÜ  £ºSMS_READ_CNFÏûÏ¢µÄ´¦Àíº¯Êı£¬Òì²½·µ»Ø¶ÁÈ¡µÄ¶ÌĞÅÄÚÈİ
-²ÎÊı  £º
-        result£º¶ÌĞÅ¶ÁÈ¡½á¹û£¬trueÎª³É¹¦£¬false»òÕßnilÎªÊ§°Ü
-		num£º¶ÌĞÅºÅÂë£¬ASCIIÂë×Ö·û´®¸ñÊ½
-		data£º¶ÌĞÅÄÚÈİ£¬UCS2´ó¶Ë¸ñÊ½µÄ16½øÖÆ×Ö·û´®
-		pos£º¶ÌĞÅµÄ´æ´¢Î»ÖÃ£¬ÔİÊ±Ã»ÓÃ
-		datetime£º¶ÌĞÅÈÕÆÚºÍÊ±¼ä£¬ASCIIÂë×Ö·û´®¸ñÊ½
-		name£º¶ÌĞÅºÅÂë¶ÔÓ¦µÄÁªÏµÈËĞÕÃû£¬ÔİÊ±Ã»ÓÃ
-·µ»ØÖµ£ºÎŞ
+å‡½æ•°åï¼šreadcnf
+åŠŸèƒ½  ï¼šSMS_READ_CNFæ¶ˆæ¯çš„å¤„ç†å‡½æ•°ï¼Œå¼‚æ­¥è¿”å›è¯»å–çš„çŸ­ä¿¡å†…å®¹
+å‚æ•°  ï¼š
+        resultï¼šçŸ­ä¿¡è¯»å–ç»“æœï¼Œtrueä¸ºæˆåŠŸï¼Œfalseæˆ–è€…nilä¸ºå¤±è´¥
+        numï¼šçŸ­ä¿¡å·ç ï¼ŒASCIIç å­—ç¬¦ä¸²æ ¼å¼
+        dataï¼šçŸ­ä¿¡å†…å®¹ï¼ŒUCS2å¤§ç«¯æ ¼å¼çš„16è¿›åˆ¶å­—ç¬¦ä¸²
+        posï¼šçŸ­ä¿¡çš„å­˜å‚¨ä½ç½®ï¼Œæš‚æ—¶æ²¡ç”¨
+        datetimeï¼šçŸ­ä¿¡æ—¥æœŸå’Œæ—¶é—´ï¼ŒASCIIç å­—ç¬¦ä¸²æ ¼å¼
+        nameï¼šçŸ­ä¿¡å·ç å¯¹åº”çš„è”ç³»äººå§“åï¼Œæš‚æ—¶æ²¡ç”¨
+è¿”å›å€¼ï¼šæ— 
 ]]
 local function readcnf(result,num,data,pos,datetime,name,total,idx,isn)
-	if result then
-		--¹ıÂËºÅÂëÖĞµÄ86ºÍ+86
-		local d1,d2 = string.find(num,"^([%+]*86)")
-		if d1 and d2 then
-			num = string.sub(num,d2+1,-1)
-		end
-		--É¾³ı¶ÌĞÅ
-		delete(tnewsms[1])
-		--´Ó¶ÌĞÅ½ÓÊÕÎ»ÖÃ±íÖĞÉ¾³ı´Ë¶ÌĞÅµÄÎ»ÖÃ
-		table.remove(tnewsms,1)
-		if total and total >1 then
-			sys.dispatch("LONG_SMS_MERGE",num,data,datetime,name,total,idx,isn)  
-			readsms()--¶ÁÈ¡ÏÂÒ»ÌõĞÂ¶ÌĞÅ
-			return
-		end
-		if data then
-			--¶ÌĞÅÄÚÈİ×ª»»ÎªGB2312×Ö·û´®¸ñÊ½
-			data = common.ucs2betogb2312(common.hexstobins(data))
-			--ÓÃ»§Ó¦ÓÃ³ÌĞò´¦Àí¶ÌĞÅ
-			if newsmscb then newsmscb(num,data,datetime) end
-		end
-		--¼ÌĞø¶ÁÈ¡ÏÂÒ»Ìõ¶ÌĞÅ
-		readsms()
-	else
-		--É¾³ı¶ÌĞÅ
-		delete(tnewsms[1])
-		--´Ó¶ÌĞÅ½ÓÊÕÎ»ÖÃ±íÖĞÉ¾³ı´Ë¶ÌĞÅµÄÎ»ÖÃ
-		table.remove(tnewsms,1)
-		--¼ÌĞø¶ÁÈ¡ÏÂÒ»Ìõ¶ÌĞÅ
-		readsms()
-	end
+    if result then
+        --è¿‡æ»¤å·ç ä¸­çš„86å’Œ+86
+        local d1,d2 = string.find(num,"^([%+]*86)")
+        if d1 and d2 then
+            num = string.sub(num,d2+1,-1)
+        end
+        --åˆ é™¤çŸ­ä¿¡
+        delete(tnewsms[1])
+        --ä»çŸ­ä¿¡æ¥æ”¶ä½ç½®è¡¨ä¸­åˆ é™¤æ­¤çŸ­ä¿¡çš„ä½ç½®
+        table.remove(tnewsms,1)
+        if total and total >1 then
+            publish("LONG_SMS_MERGE",num,data,datetime,name,total,idx,isn)
+            readsms()--è¯»å–ä¸‹ä¸€æ¡æ–°çŸ­ä¿¡
+            return
+        end
+        if data then
+            --çŸ­ä¿¡å†…å®¹è½¬æ¢ä¸ºGB2312å­—ç¬¦ä¸²æ ¼å¼
+            data = common.ucs2beToGb2312(data:fromHex())
+            --ç”¨æˆ·åº”ç”¨ç¨‹åºå¤„ç†çŸ­ä¿¡
+            if newsmscb then newsmscb(num,data,datetime) end
+        end
+        --ç»§ç»­è¯»å–ä¸‹ä¸€æ¡çŸ­ä¿¡
+        readsms()
+    else
+        --åˆ é™¤çŸ­ä¿¡
+        delete(tnewsms[1])
+        --ä»çŸ­ä¿¡æ¥æ”¶ä½ç½®è¡¨ä¸­åˆ é™¤æ­¤çŸ­ä¿¡çš„ä½ç½®
+        table.remove(tnewsms,1)
+        --ç»§ç»­è¯»å–ä¸‹ä¸€æ¡çŸ­ä¿¡
+        readsms()
+    end
 end
 
 local function longsmsmergecnf(res,num,data,datetime)
-	--print("longsmsmergecnf",num,data,datetime)
-	if data then
-		--¶ÌĞÅÄÚÈİ×ª»»ÎªGB2312×Ö·û´®¸ñÊ½
-		data = common.ucs2betogb2312(common.hexstobins(data))
-		--ÓÃ»§Ó¦ÓÃ³ÌĞò´¦Àí¶ÌĞÅ
-		if newsmscb then newsmscb(num,data,datetime) end
-	end
+    --log.info("longsmsmergecnf",num,data,datetime)
+    if data then
+        --çŸ­ä¿¡å†…å®¹è½¬æ¢ä¸ºGB2312å­—ç¬¦ä¸²æ ¼å¼
+        data = common.ucs2beToGb2312(data:fromHex())
+        --ç”¨æˆ·åº”ç”¨ç¨‹åºå¤„ç†çŸ­ä¿¡
+        if newsmscb then newsmscb(num,data,datetime) end
+    end
 end
 
 local function rdy()
-	ready = true
-	sndnxt()
+    ready = true
+    sndnxt()
 end
 
---¶ÌĞÅÄ£¿éµÄÄÚ²¿ÏûÏ¢´¦Àí±í
-local smsapp =
-{
-	SMS_NEW_MSG_IND = newsms, --ÊÕµ½ĞÂ¶ÌĞÅ£¬sms.lua»áÅ×³öSMS_NEW_MSG_INDÏûÏ¢
-	SMS_READ_CNF = readcnf, --µ÷ÓÃsms.read¶ÁÈ¡¶ÌĞÅÖ®ºó£¬sms.lua»áÅ×³öSMS_READ_CNFÏûÏ¢
-	SMS_SEND_CNF = sendcnf, --µ÷ÓÃsms.send·¢ËÍ¶ÌĞÅÖ®ºó£¬sms.lua»áÅ×³öSMS_SEND_CNFÏûÏ¢
-	SMS_READY = rdy, --µ×²ã¶ÌĞÅÄ£¿é×¼±¸¾ÍĞ÷
-	LONG_SMS_MERGR_CNF = longsmsmergecnf,
-}
+sys.subscribe("SMS_NEW_MSG_IND",newsms)
+sys.subscribe("SMS_READ_CNF",readcnf)
+sys.subscribe("SMS_SEND_CNF",sendcnf)
+sys.subscribe("SMS_READY",rdy)
+sys.subscribe("LONG_SMS_MERGR_CNF",longsmsmergecnf)
 
---×¢²áÏûÏ¢´¦Àíº¯Êı
-sys.regapp(smsapp)

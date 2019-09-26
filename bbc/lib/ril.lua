@@ -1,617 +1,585 @@
---[[
-Ä£¿éÃû³Æ£ºĞéÄâ´®¿ÚATÃüÁî½»»¥¹ÜÀí
-Ä£¿é¹¦ÄÜ£ºAT½»»¥
-Ä£¿é×îºóĞŞ¸ÄÊ±¼ä£º2017.02.13
-]]
---¶¨ÒåÄ£¿é,µ¼ÈëÒÀÀµ¿â
-local base = _G
-local table = require"table"
-local string = require"string"
-local uart = require"uart"
-local rtos = require"rtos"
-local sys = require"sys"
-module("ril")
+--- æ¨¡å—åŠŸèƒ½ï¼šè™šæ‹Ÿä¸²å£ATå‘½ä»¤äº¤äº’ç®¡ç†
+-- @module ril
+-- @author openLuat
+-- @license MIT
+-- @copyright openLuat
+-- @release 2017.02.13
 
---¼ÓÔØ³£ÓÃµÄÈ«¾Öº¯ÊıÖÁ±¾µØ
-local setmetatable = base.setmetatable
-local print = base.print
-local type = base.type
-local smatch,sfind,slen = string.match,string.find,string.len
+require "uart"
+require "rtos"
+require "sys"
+require "log"
+module(..., package.seeall)
+
+--åŠ è½½å¸¸ç”¨çš„å…¨å±€å‡½æ•°è‡³æœ¬åœ°
 local vwrite = uart.write
 local vread = uart.read
 
---ÊÇ·ñÎªÍ¸´«Ä£Ê½£¬trueÎªÍ¸´«Ä£Ê½£¬false»òÕßnilÎª·ÇÍ¸´«Ä£Ê½
---Ä¬ÈÏ·ÇÍ¸´«Ä£Ê½
+--æ˜¯å¦ä¸ºé€ä¼ æ¨¡å¼ï¼Œtrueä¸ºé€ä¼ æ¨¡å¼ï¼Œfalseæˆ–è€…nilä¸ºéé€ä¼ æ¨¡å¼
+--é»˜è®¤éé€ä¼ æ¨¡å¼
 local transparentmode
---Í¸´«Ä£Ê½ÏÂ£¬ĞéÄâ´®¿ÚÊı¾İ½ÓÊÕµÄ´¦Àíº¯Êı
+--é€ä¼ æ¨¡å¼ä¸‹ï¼Œè™šæ‹Ÿä¸²å£æ•°æ®æ¥æ”¶çš„å¤„ç†å‡½æ•°
 local rcvfunc
 
---Ö´ĞĞATÃüÁîºó1·ÖÖÓÎŞ·´À¡£¬ÅĞ¶¨atÃüÁîÖ´ĞĞÊ§°Ü£¬ÔòÖØÆôÈí¼ş
-local TIMEOUT = 60000 
-local DATA_TIMEOUT = 60000
+--æ‰§è¡ŒATå‘½ä»¤å1åˆ†é’Ÿæ— åé¦ˆï¼Œåˆ¤å®šatå‘½ä»¤æ‰§è¡Œå¤±è´¥ï¼Œåˆ™é‡å¯è½¯ä»¶
+local TIMEOUT,DATA_TIMEOUT = 120000,120000
 
---ATÃüÁîµÄÓ¦´ğÀàĞÍ
---NORESULT£ºÊÕµ½µÄÓ¦´ğÊı¾İµ±×öurcÍ¨Öª´¦Àí£¬Èç¹û·¢ËÍµÄATÃüÁî²»´¦ÀíÓ¦´ğ»òÕßÃ»ÓĞÉèÖÃÀàĞÍ£¬Ä¬ÈÏÎª´ËÀàĞÍ
---NUMBERIC£º´¿Êı×ÖÀàĞÍ£»ÀıÈç·¢ËÍAT+CGSNÃüÁî£¬Ó¦´ğµÄÄÚÈİÎª£º862991527986589\r\nOK£¬´ËÀàĞÍÖ¸µÄÊÇ862991527986589ÕâÒ»²¿·ÖÎª´¿Êı×ÖÀàĞÍ
---SLINE£ºÓĞÇ°×ºµÄµ¥ĞĞ×Ö·û´®ÀàĞÍ£»ÀıÈç·¢ËÍAT+CSQÃüÁî£¬Ó¦´ğµÄÄÚÈİÎª£º+CSQ: 23,99\r\nOK£¬´ËÀàĞÍÖ¸µÄÊÇ+CSQ: 23,99ÕâÒ»²¿·ÖÎªµ¥ĞĞ×Ö·û´®ÀàĞÍ
---MLINE£ºÓĞÇ°×ºµÄ¶àĞĞ×Ö·û´®ÀàĞÍ£»ÀıÈç·¢ËÍAT+CMGR=5ÃüÁî£¬Ó¦´ğµÄÄÚÈİÎª£º+CMGR: 0,,84\r\n0891683108200105F76409A001560889F800087120315123842342050003590404590D003A59\r\nOK£¬´ËÀàĞÍÖ¸µÄÊÇOKÖ®Ç°Îª¶àĞĞ×Ö·û´®ÀàĞÍ
---STRING£ºÎŞÇ°×ºµÄ×Ö·û´®ÀàĞÍ£¬ÀıÈç·¢ËÍAT+ATWMFT=99ÃüÁî£¬Ó¦´ğµÄÄÚÈİÎª£ºSUCC\r\nOK£¬´ËÀàĞÍÖ¸µÄÊÇSUCC
---SPECIAL£ºÌØÊâÀàĞÍ£¬ĞèÒªÕë¶ÔATÃüÁî×öÌØÊâ´¦Àí£¬ÀıÈçCIPSEND¡¢CIPCLOSE¡¢CIFSR
-local NORESULT,NUMBERIC,SLINE,MLINE,STRING,SPECIAL = 0,1,2,3,4,10
+--ATå‘½ä»¤çš„åº”ç­”ç±»å‹
+--NORESULTï¼šæ”¶åˆ°çš„åº”ç­”æ•°æ®å½“åšurcé€šçŸ¥å¤„ç†ï¼Œå¦‚æœå‘é€çš„ATå‘½ä»¤ä¸å¤„ç†åº”ç­”æˆ–è€…æ²¡æœ‰è®¾ç½®ç±»å‹ï¼Œé»˜è®¤ä¸ºæ­¤ç±»å‹
+--NUMBERICï¼šçº¯æ•°å­—ç±»å‹ï¼›ä¾‹å¦‚å‘é€AT+CGSNå‘½ä»¤ï¼Œåº”ç­”çš„å†…å®¹ä¸ºï¼š862991527986589\r\nOKï¼Œæ­¤ç±»å‹æŒ‡çš„æ˜¯862991527986589è¿™ä¸€éƒ¨åˆ†ä¸ºçº¯æ•°å­—ç±»å‹
+--SLINEï¼šæœ‰å‰ç¼€çš„å•è¡Œå­—ç¬¦ä¸²ç±»å‹ï¼›ä¾‹å¦‚å‘é€AT+CSQå‘½ä»¤ï¼Œåº”ç­”çš„å†…å®¹ä¸ºï¼š+CSQ: 23,99\r\nOKï¼Œæ­¤ç±»å‹æŒ‡çš„æ˜¯+CSQ: 23,99è¿™ä¸€éƒ¨åˆ†ä¸ºå•è¡Œå­—ç¬¦ä¸²ç±»å‹
+--MLINEï¼šæœ‰å‰ç¼€çš„å¤šè¡Œå­—ç¬¦ä¸²ç±»å‹ï¼›ä¾‹å¦‚å‘é€AT+CMGR=5å‘½ä»¤ï¼Œåº”ç­”çš„å†…å®¹ä¸ºï¼š+CMGR: 0,,84\r\n0891683108200105F76409A001560889F800087120315123842342050003590404590D003A59\r\nOKï¼Œæ­¤ç±»å‹æŒ‡çš„æ˜¯OKä¹‹å‰ä¸ºå¤šè¡Œå­—ç¬¦ä¸²ç±»å‹
+--STRINGï¼šæ— å‰ç¼€çš„å­—ç¬¦ä¸²ç±»å‹ï¼Œä¾‹å¦‚å‘é€AT+ATWMFT=99å‘½ä»¤ï¼Œåº”ç­”çš„å†…å®¹ä¸ºï¼šSUCC\r\nOKï¼Œæ­¤ç±»å‹æŒ‡çš„æ˜¯SUCC
+--SPECIALï¼šç‰¹æ®Šç±»å‹ï¼Œéœ€è¦é’ˆå¯¹ATå‘½ä»¤åšç‰¹æ®Šå¤„ç†ï¼Œä¾‹å¦‚CIPSENDã€CIPCLOSEã€CIFSR
+local NORESULT, NUMBERIC, SLINE, MLINE, STRING, SPECIAL = 0, 1, 2, 3, 4, 10
 
---ATÃüÁîµÄÓ¦´ğÀàĞÍ±í£¬Ô¤ÖÃÁËÈçÏÂ¼¸Ïî
+--ATå‘½ä»¤çš„åº”ç­”ç±»å‹è¡¨ï¼Œé¢„ç½®äº†å¦‚ä¸‹å‡ é¡¹
 local RILCMD = {
-	["+CSQ"] = 2,
-	["+CGSN"] = 1,
-	["+WISN"] = 4,
-	["+CIMI"] = 1,
-	["+CCID"] = 1,
-	["+CGATT"] = 2,
-	["+CCLK"] = 2,
-	["+ATWMFT"] = 4,
-	["+CMGR"] = 3,
-	["+CMGS"] = 2,
-	["+CPBF"] = 3,
-	["+CPBR"] = 3,
- 	["+CIPSEND"] = 10,
-	["+CIPCLOSE"] = 10,
-	["+SSLINIT"] = 10,
-	["+SSLCERT"] = 10,
-	["+SSLCREATE"] = 10,
-	["+SSLCONNECT"] = 10,
-	["+SSLSEND"] = 10,
-	["+SSLDESTROY"] = 10,
-	["+SSLTERM"] = 10,
-	["+CIFSR"] = 10,
+    ["+CSQ"] = 2,
+    ["+MUID"] = 2,
+    ["+CGSN"] = 1,
+    ["+WISN"] = 4,
+    ["+CIMI"] = 1,
+    ["+CCID"] = 1,
+    ["+CGATT"] = 2,
+    ["+CCLK"] = 2,
+    ["+ATWMFT"] = 4,
+    ["+CMGR"] = 3,
+    ["+CMGS"] = 2,
+    ["+CPBF"] = 3,
+    ["+CPBR"] = 3,
+    ['+CLCC'] = 3,
+    ["+CIPSEND"] = 10,
+    ["+CIPCLOSE"] = 10,
+    ["+SSLINIT"] = 10,
+    ["+SSLCERT"] = 10,
+    ["+SSLCREATE"] = 10,
+    ["+SSLCONNECT"] = 10,
+    ["+SSLSEND"] = 10,
+    ["+SSLDESTROY"] = 10,
+    ["+SSLTERM"] = 10,
+    ["+CIFSR"] = 10,
+    ["+CTFSGETID"] = 2,
+    ["+CTFSDECRYPT"] = 2,
+    ["+CTFSAUTH"] = 2,
+    ["+ALIPAYOPEN"] = 2,
+    ["+ALIPAYREP"] = 2,
+    ["+ALIPAYPINFO"] = 2,
+    ["+ALIPAYACT"] = 2,
+    ["+ALIPAYDID"] = 2,
+    ["+ALIPAYSIGN"] = 2,
 }
 
---radioready£ºATÃüÁîÍ¨µÀÊÇ·ñ×¼±¸¾ÍĞ÷
---delaying£ºÖ´ĞĞÍêÄ³Ğ©ATÃüÁîÇ°£¬ĞèÒªÑÓÊ±Ò»¶ÎÊ±¼ä£¬²ÅÔÊĞíÖ´ĞĞÕâĞ©ATÃüÁî£»´Ë±êÖ¾±íÊ¾ÊÇ·ñÔÚÑÓÊ±×´Ì¬
-local radioready,delaying = false
+--radioreadyï¼šATå‘½ä»¤é€šé“æ˜¯å¦å‡†å¤‡å°±ç»ª
+--delayingï¼šæ‰§è¡Œå®ŒæŸäº›ATå‘½ä»¤å‰ï¼Œéœ€è¦å»¶æ—¶ä¸€æ®µæ—¶é—´ï¼Œæ‰å…è®¸æ‰§è¡Œè¿™äº›ATå‘½ä»¤ï¼›æ­¤æ ‡å¿—è¡¨ç¤ºæ˜¯å¦åœ¨å»¶æ—¶çŠ¶æ€
+local radioready, delaying = false
 
---ATÃüÁî¶ÓÁĞ
+--ATå‘½ä»¤é˜Ÿåˆ—
 local cmdqueue = {
-	"ATE0",
-	"AT+CMEE=0",
+    "ATE0",
+    "AT+CMEE=0",
 }
---µ±Ç°ÕıÔÚÖ´ĞĞµÄATÃüÁî,²ÎÊı,·´À¡»Øµ÷,ÑÓ³ÙÖ´ĞĞÊ±¼ä,ÃüÁîÍ·,ÀàĞÍ,·´À¡¸ñÊ½
-local currcmd,currarg,currsp,curdelay,cmdhead,cmdtype,rspformt
---·´À¡½á¹û,ÖĞ¼äĞÅÏ¢,½á¹ûĞÅÏ¢
-local result,interdata,respdata
+--å½“å‰æ­£åœ¨æ‰§è¡Œçš„ATå‘½ä»¤,å‚æ•°,åé¦ˆå›è°ƒ,å»¶è¿Ÿæ‰§è¡Œæ—¶é—´,å‘½ä»¤å¤´,ç±»å‹,åé¦ˆæ ¼å¼
+local currcmd, currarg, currsp, curdelay, cmdhead, cmdtype, rspformt
+--åé¦ˆç»“æœ,ä¸­é—´ä¿¡æ¯,ç»“æœä¿¡æ¯
+local result, interdata, respdata
 
---ril»á³öÏÖÈıÖÖÇé¿ö: 
---·¢ËÍATÃüÁî£¬ÊÕµ½Ó¦´ğ
---·¢ËÍATÃüÁî£¬ÃüÁî³¬Ê±Ã»ÓĞÓ¦´ğ
---µ×²ãÈí¼şÖ÷¶¯ÉÏ±¨µÄÍ¨Öª£¬ÏÂÎÄÎÒÃÇ¼ò³ÆÎªurc
+local sslCreating
 
+--rilä¼šå‡ºç°ä¸‰ç§æƒ…å†µ:
+--å‘é€ATå‘½ä»¤ï¼Œæ”¶åˆ°åº”ç­”
+--å‘é€ATå‘½ä»¤ï¼Œå‘½ä»¤è¶…æ—¶æ²¡æœ‰åº”ç­”
+--åº•å±‚è½¯ä»¶ä¸»åŠ¨ä¸ŠæŠ¥çš„é€šçŸ¥ï¼Œä¸‹æ–‡æˆ‘ä»¬ç®€ç§°ä¸ºurc
 --[[
-º¯ÊıÃû£ºatimeout
-¹¦ÄÜ  £º·¢ËÍATÃüÁî£¬ÃüÁî³¬Ê±Ã»ÓĞÓ¦´ğµÄ´¦Àí
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
+å‡½æ•°åï¼šatimeout
+åŠŸèƒ½  ï¼šå‘é€ATå‘½ä»¤ï¼Œå‘½ä»¤è¶…æ—¶æ²¡æœ‰åº”ç­”çš„å¤„ç†
+å‚æ•°  ï¼šæ— 
+è¿”å›å€¼ï¼šæ— 
 ]]
 local function atimeout()
-	--ÖØÆôÈí¼ş
-	sys.restart("ril.atimeout_"..(currcmd or ""))
+    --é‡å¯è½¯ä»¶
+    sys.restart("ril.atimeout_" .. (currcmd or ""))
 end
 
 --[[
-º¯ÊıÃû£ºdefrsp
-¹¦ÄÜ  £ºATÃüÁîµÄÄ¬ÈÏÓ¦´ğ´¦Àí¡£Èç¹ûÃ»ÓĞ¶¨ÒåÄ³¸öATµÄÓ¦´ğ´¦Àíº¯Êı£¬Ôò»á×ßµ½±¾º¯Êı
-²ÎÊı  £º
-		cmd£º´ËÓ¦´ğ¶ÔÓ¦µÄATÃüÁî
-		success£ºATÃüÁîÖ´ĞĞ½á¹û£¬true»òÕßfalse
-		response£ºATÃüÁîµÄÓ¦´ğÖĞµÄÖ´ĞĞ½á¹û×Ö·û´®
-		intermediate£ºATÃüÁîµÄÓ¦´ğÖĞµÄÖĞ¼äĞÅÏ¢
-·µ»ØÖµ£ºÎŞ
+å‡½æ•°åï¼šdefrsp
+åŠŸèƒ½  ï¼šATå‘½ä»¤çš„é»˜è®¤åº”ç­”å¤„ç†ã€‚å¦‚æœæ²¡æœ‰å®šä¹‰æŸä¸ªATçš„åº”ç­”å¤„ç†å‡½æ•°ï¼Œåˆ™ä¼šèµ°åˆ°æœ¬å‡½æ•°
+å‚æ•°  ï¼š
+cmdï¼šæ­¤åº”ç­”å¯¹åº”çš„ATå‘½ä»¤
+successï¼šATå‘½ä»¤æ‰§è¡Œç»“æœï¼Œtrueæˆ–è€…false
+responseï¼šATå‘½ä»¤çš„åº”ç­”ä¸­çš„æ‰§è¡Œç»“æœå­—ç¬¦ä¸²
+intermediateï¼šATå‘½ä»¤çš„åº”ç­”ä¸­çš„ä¸­é—´ä¿¡æ¯
+è¿”å›å€¼ï¼šæ— 
 ]]
-local function defrsp(cmd,success,response,intermediate)
-	print("default response:",cmd,success,response,intermediate)
+local function defrsp(cmd, success, response, intermediate)
+    log.info("ril.defrsp", cmd, success, response, intermediate)
 end
 
---ATÃüÁîµÄÓ¦´ğ´¦Àí±í
+--ATå‘½ä»¤çš„åº”ç­”å¤„ç†è¡¨
 local rsptable = {}
-setmetatable(rsptable,{__index = function() return defrsp end})
+setmetatable(rsptable, {__index = function() return defrsp end})
 
---×Ô¶¨ÒåµÄATÃüÁîÓ¦´ğ¸ñÊ½±í£¬µ±ATÃüÁîÓ¦´ğÎªSTRING¸ñÊ½Ê±£¬ÓÃ»§¿ÉÒÔ½øÒ»²½¶¨ÒåÕâÀïÃæµÄ¸ñÊ½
+--è‡ªå®šä¹‰çš„ATå‘½ä»¤åº”ç­”æ ¼å¼è¡¨ï¼Œå½“ATå‘½ä»¤åº”ç­”ä¸ºSTRINGæ ¼å¼æ—¶ï¼Œç”¨æˆ·å¯ä»¥è¿›ä¸€æ­¥å®šä¹‰è¿™é‡Œé¢çš„æ ¼å¼
 local formtab = {}
 
---[[
-º¯ÊıÃû£ºregrsp
-¹¦ÄÜ  £º×¢²áÄ³¸öATÃüÁîÓ¦´ğµÄ´¦Àíº¯Êı
-²ÎÊı  £º
-		head£º´ËÓ¦´ğ¶ÔÓ¦µÄATÃüÁîÍ·£¬È¥µôÁË×îÇ°ÃæµÄATÁ½¸ö×Ö·û
-		fnc£ºATÃüÁîÓ¦´ğµÄ´¦Àíº¯Êı
-		typ£ºATÃüÁîµÄÓ¦´ğÀàĞÍ£¬È¡Öµ·¶Î§NORESULT,NUMBERIC,SLINE,MLINE,STRING,SPECIAL
-		formt£ºtypÎªSTRINGÊ±£¬½øÒ»²½¶¨ÒåSTRINGÖĞµÄÏêÏ¸¸ñÊ½
-·µ»ØÖµ£º³É¹¦·µ»Øtrue£¬Ê§°Üfalse
-]]
-function regrsp(head,fnc,typ,formt)
-	--Ã»ÓĞ¶¨ÒåÓ¦´ğÀàĞÍ
-	if typ == nil then
-		rsptable[head] = fnc
-		return true
-	end
-	--¶¨ÒåÁËºÏ·¨Ó¦´ğÀàĞÍ
-	if typ == 0 or typ == 1 or typ == 2 or typ == 3 or typ == 4 or typ == 10 then
-		--Èç¹ûATÃüÁîµÄÓ¦´ğÀàĞÍÒÑ´æÔÚ£¬²¢ÇÒÓëĞÂÉèÖÃµÄ²»Ò»ÖÂ
-		if RILCMD[head] and RILCMD[head] ~= typ then
-			return false
-		end
-		--±£´æ
-		RILCMD[head] = typ
-		rsptable[head] = fnc
-		formtab[head] = formt
-		return true
-	else
-		return false
-	end
+---æ³¨å†ŒæŸä¸ªATå‘½ä»¤åº”ç­”çš„å¤„ç†å‡½æ•°
+-- @param head  æ­¤åº”ç­”å¯¹åº”çš„ATå‘½ä»¤å¤´ï¼Œå»æ‰äº†æœ€å‰é¢çš„ATä¸¤ä¸ªå­—ç¬¦
+-- @param fnc   ATå‘½ä»¤åº”ç­”çš„å¤„ç†å‡½æ•°
+-- @param typ   ATå‘½ä»¤çš„åº”ç­”ç±»å‹ï¼Œå–å€¼èŒƒå›´NORESULT,NUMBERIC,SLINE,MLINE,STRING,SPECIAL
+-- @param formt typä¸ºSTRINGæ—¶ï¼Œè¿›ä¸€æ­¥å®šä¹‰STRINGä¸­çš„è¯¦ç»†æ ¼å¼
+-- @return bool ,æˆåŠŸè¿”å›trueï¼Œå¤±è´¥false
+-- @usage ril.regRsp("+CSQ", rsp)
+function regRsp(head, fnc, typ, formt)
+    --æ²¡æœ‰å®šä¹‰åº”ç­”ç±»å‹
+    if typ == nil then
+        rsptable[head] = fnc
+        return true
+    end
+    --å®šä¹‰äº†åˆæ³•åº”ç­”ç±»å‹
+    if typ == 0 or typ == 1 or typ == 2 or typ == 3 or typ == 4 or typ == 10 then
+        --å¦‚æœATå‘½ä»¤çš„åº”ç­”ç±»å‹å·²å­˜åœ¨ï¼Œå¹¶ä¸”ä¸æ–°è®¾ç½®çš„ä¸ä¸€è‡´
+        if RILCMD[head] and RILCMD[head] ~= typ then
+            return false
+        end
+        --ä¿å­˜
+        RILCMD[head] = typ
+        rsptable[head] = fnc
+        formtab[head] = formt
+        return true
+    else
+        return false
+    end
 end
 
 --[[
-º¯ÊıÃû£ºrsp
-¹¦ÄÜ  £ºATÃüÁîµÄÓ¦´ğ´¦Àí
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
+å‡½æ•°åï¼šrsp
+åŠŸèƒ½  ï¼šATå‘½ä»¤çš„åº”ç­”å¤„ç†
+å‚æ•°  ï¼šæ— 
+è¿”å›å€¼ï¼šæ— 
 ]]
 local function rsp()
-	--Í£Ö¹Ó¦´ğ³¬Ê±¶¨Ê±Æ÷
-	sys.timer_stop(atimeout)
-	--Èç¹û·¢ËÍATÃüÁîÊ±ÒÑ¾­Í¬²½Ö¸¶¨ÁËÓ¦´ğ´¦Àíº¯Êı
-	if currsp then
-		currsp(currcmd,result,respdata,interdata)
-	--ÓÃ»§×¢²áµÄÓ¦´ğ´¦Àíº¯Êı±íÖĞÕÒµ½´¦Àíº¯Êı
-	else
-		rsptable[cmdhead](currcmd,result,respdata,interdata)
-	end
-	--ÖØÖÃÈ«¾Ö±äÁ¿
-	currcmd,currarg,currsp,curdelay,cmdhead,cmdtype,rspformt = nil
-	result,interdata,respdata = nil
+    --åœæ­¢åº”ç­”è¶…æ—¶å®šæ—¶å™¨
+    sys.timerStopAll(atimeout)
+    --å¦‚æœå‘é€ATå‘½ä»¤æ—¶å·²ç»åŒæ­¥æŒ‡å®šäº†åº”ç­”å¤„ç†å‡½æ•°
+    if currsp then
+        currsp(currcmd, result, respdata, interdata)
+    --ç”¨æˆ·æ³¨å†Œçš„åº”ç­”å¤„ç†å‡½æ•°è¡¨ä¸­æ‰¾åˆ°å¤„ç†å‡½æ•°
+    else
+        rsptable[cmdhead](currcmd, result, respdata, interdata)
+    end
+    --é‡ç½®å…¨å±€å˜é‡
+    currcmd, currarg, currsp, curdelay, cmdhead, cmdtype, rspformt = nil
+    result, interdata, respdata = nil
 end
 
 --[[
-º¯ÊıÃû£ºdefurc
-¹¦ÄÜ  £ºurcµÄÄ¬ÈÏ´¦Àí¡£Èç¹ûÃ»ÓĞ¶¨ÒåÄ³¸öurcµÄÓ¦´ğ´¦Àíº¯Êı£¬Ôò»á×ßµ½±¾º¯Êı
-²ÎÊı  £º
-		data£ºurcÄÚÈİ
-·µ»ØÖµ£ºÎŞ
+å‡½æ•°åï¼šdefurc
+åŠŸèƒ½  ï¼šurcçš„é»˜è®¤å¤„ç†ã€‚å¦‚æœæ²¡æœ‰å®šä¹‰æŸä¸ªurcçš„åº”ç­”å¤„ç†å‡½æ•°ï¼Œåˆ™ä¼šèµ°åˆ°æœ¬å‡½æ•°
+å‚æ•°  ï¼š
+dataï¼šurcå†…å®¹
+è¿”å›å€¼ï¼šæ— 
 ]]
 local function defurc(data)
-	print("defurc:",data)
+    log.info("ril.defurc", data)
 end
 
---urcµÄ´¦Àí±í
+--urcçš„å¤„ç†è¡¨
 local urctable = {}
-setmetatable(urctable,{__index = function() return defurc end})
+setmetatable(urctable, {__index = function() return defurc end})
 
---[[
-º¯ÊıÃû£ºregurc
-¹¦ÄÜ  £º×¢²áÄ³¸öurcµÄ´¦Àíº¯Êı
-²ÎÊı  £º
-		prefix£ºurcÇ°×º£¬×îÇ°ÃæµÄÁ¬Ğø×Ö·û´®£¬°üº¬+¡¢´óĞ´×Ö·û¡¢Êı×ÖµÄ×éºÏ
-		handler£ºurcµÄ´¦Àíº¯Êı
-·µ»ØÖµ£ºÎŞ
-]]
-function regurc(prefix,handler)
-	urctable[prefix] = handler
+--- æ³¨å†ŒæŸä¸ªurcçš„å¤„ç†å‡½æ•°
+-- @param prefix    urcå‰ç¼€ï¼Œæœ€å‰é¢çš„è¿ç»­å­—ç¬¦ä¸²ï¼ŒåŒ…å«+ã€å¤§å†™å­—ç¬¦ã€æ•°å­—çš„ç»„åˆ
+-- @param handler   urcçš„å¤„ç†å‡½æ•°
+-- @return æ— 
+-- @usage ril.regUrc("+CREG", neturc)
+function regUrc(prefix, handler)
+    urctable[prefix] = handler
 end
 
---[[
-º¯ÊıÃû£ºderegurc
-¹¦ÄÜ  £º½â×¢²áÄ³¸öurcµÄ´¦Àíº¯Êı
-²ÎÊı  £º
-		prefix£ºurcÇ°×º£¬×îÇ°ÃæµÄÁ¬Ğø×Ö·û´®£¬°üº¬+¡¢´óĞ´×Ö·û¡¢Êı×ÖµÄ×éºÏ
-·µ»ØÖµ£ºÎŞ
-]]
-function deregurc(prefix)
-	urctable[prefix] = nil
+--- è§£æ³¨å†ŒæŸä¸ªurcçš„å¤„ç†å‡½æ•°
+-- @param prefix    urcå‰ç¼€ï¼Œæœ€å‰é¢çš„è¿ç»­å­—ç¬¦ä¸²ï¼ŒåŒ…å«+ã€å¤§å†™å­—ç¬¦ã€æ•°å­—çš„ç»„åˆ
+-- @return æ— 
+-- @usage deRegUrc("+CREG")
+function deRegUrc(prefix)
+    urctable[prefix] = nil
 end
 
---¡°Êı¾İ¹ıÂËÆ÷¡±£¬ĞéÄâ´®¿ÚÊÕµ½µÄÊı¾İÊ±£¬Ê×ÏÈĞèÒªµ÷ÓÃ´Ëº¯Êı¹ıÂË´¦ÀíÒ»ÏÂ
-local urcfilter,urcfilterlen
+--â€œæ•°æ®è¿‡æ»¤å™¨â€ï¼Œè™šæ‹Ÿä¸²å£æ”¶åˆ°çš„æ•°æ®æ—¶ï¼Œé¦–å…ˆéœ€è¦è°ƒç”¨æ­¤å‡½æ•°è¿‡æ»¤å¤„ç†ä¸€ä¸‹
+local urcfilter
 
 --[[
-º¯ÊıÃû£ºurc
-¹¦ÄÜ  £ºurc´¦Àí
-²ÎÊı  £º
-		data£ºurcÊı¾İ
-·µ»ØÖµ£ºÎŞ
+å‡½æ•°åï¼šurc
+åŠŸèƒ½  ï¼šurcå¤„ç†
+å‚æ•°  ï¼š
+dataï¼šurcæ•°æ®
+è¿”å›å€¼ï¼šæ— 
 ]]
 local function urc(data)
-	--ATÍ¨µÀ×¼±¸¾ÍĞ÷
-	if data == "RDY" then
-		radioready = true
-	else
-		local prefix = smatch(data,"(%+*[%u%d& ]+)")
-		--Ö´ĞĞprefixµÄurc´¦Àíº¯Êı£¬·µ»ØÊı¾İ¹ıÂËÆ÷
-		urcfilter,urcfilterlen = urctable[prefix](data,prefix)
-	end
+    --ATé€šé“å‡†å¤‡å°±ç»ª
+    if data == "RDY" then
+        radioready = true
+    else
+        local prefix = string.match(data, "([%+%*]*[%u%d& ]+)")
+        --æ‰§è¡Œprefixçš„urcå¤„ç†å‡½æ•°ï¼Œè¿”å›æ•°æ®è¿‡æ»¤å™¨
+        urcfilter = urctable[prefix](data, prefix)
+    end
 end
 
 --[[
-º¯ÊıÃû£ºprocatc
-¹¦ÄÜ  £º´¦ÀíĞéÄâ´®¿ÚÊÕµ½µÄÊı¾İ
-²ÎÊı  £º
-		data£ºÊÕµ½µÄÊı¾İ
-·µ»ØÖµ£ºÎŞ
+å‡½æ•°åï¼šprocatc
+åŠŸèƒ½  ï¼šå¤„ç†è™šæ‹Ÿä¸²å£æ”¶åˆ°çš„æ•°æ®
+å‚æ•°  ï¼š
+dataï¼šæ”¶åˆ°çš„æ•°æ®
+è¿”å›å€¼ï¼šæ— 
 ]]
 local function procatc(data)
-	--Èç¹ûÃüÁîµÄÓ¦´ğÊÇ¶àĞĞ×Ö·û´®¸ñÊ½
-	if interdata and cmdtype == MLINE then
-		--²»³öÏÖOK\r\n£¬ÔòÈÏÎªÓ¦´ğ»¹Î´½áÊø
-		if data ~= "OK\r\n" then
-			--È¥µô×îºóµÄ\r\n
-			if sfind(data,"\r\n",-2) then
-				data = string.sub(data,1,-3)
-			end
-			--Æ´½Óµ½ÖĞ¼äÊı¾İ
-			interdata = interdata .. "\r\n" .. data
-			return
-		end
-	end
-	--Èç¹û´æÔÚ¡°Êı¾İ¹ıÂËÆ÷¡±
-	if urcfilter then
-		if urcfilterlen and urcfilterlen<200 then print(data) end
-		data,urcfilter = urcfilter(data)
-	else
-		print("atc:",data)
-	end
-	--È¥µô×îºóµÄ\r\n
-	if sfind(data,"\r\n",-2) then
-		data = string.sub(data,1,-3)
-	end
-	--Êı¾İÎª¿Õ
-	if data == "" then
-		return
-	end
-	--µ±Ç°ÎŞÃüÁîÔÚÖ´ĞĞÔòÅĞ¶¨Îªurc
-	if currcmd == nil then
-		urc(data)
-		return
-	end
-
-	local isurc = false
-
-	--Ò»Ğ©ÌØÊâµÄ´íÎóĞÅÏ¢£¬×ª»¯ÎªERRORÍ³Ò»´¦Àí
-	if sfind(data,"^%+CMS ERROR:") or sfind(data,"^%+CME ERROR:") or (data == "CONNECT FAIL" and currcmd and smatch(currcmd,"CIPSTART")) then
-		data = "ERROR"
-	end
-	--Ö´ĞĞ³É¹¦µÄÓ¦´ğ
-	if data == "OK" or data == "SHUT OK" then
-		result = true
-		respdata = data
-	--Ö´ĞĞÊ§°ÜµÄÓ¦´ğ
-	elseif data == "ERROR" or data == "NO ANSWER" or data == "NO DIALTONE" then
-		result = false
-		respdata = data
-	--ĞèÒª¼ÌĞøÊäÈë²ÎÊıµÄATÃüÁîÓ¦´ğ
-	elseif data == "> " then
-		--·¢ËÍ¶ÌĞÅ
-		if cmdhead == "+CMGS" then
-			print("send:",currarg)
-			vwrite(uart.ATC,currarg,"\026")
-		--·¢ËÍÊı¾İ
-		elseif cmdhead == "+CIPSEND" or cmdhead == "+SSLSEND" or cmdhead == "+SSLCERT" then
-			print("send first 200 bytes",currarg:sub(1,200))
-			vwrite(uart.ATC,currarg)
-		else
-			print("error promot cmd:",currcmd)
-		end
-	else
-		--ÎŞÀàĞÍ
-		if cmdtype == NORESULT then
-			isurc = true
-		--È«Êı×ÖÀàĞÍ
-		elseif cmdtype == NUMBERIC then
-			local numstr = smatch(data,"(%x+)")
-			if numstr == data then
-				interdata = data
-			else
-				isurc = true
-			end
-		--×Ö·û´®ÀàĞÍ
-		elseif cmdtype == STRING then
-			--½øÒ»²½¼ì²é¸ñÊ½
-			if smatch(data,rspformt or "^.+$") then
-				interdata = data
-			else
-				isurc = true
-			end
-		elseif cmdtype == SLINE or cmdtype == MLINE then
-			if interdata == nil and sfind(data, cmdhead) == 1 then
-				interdata = data
-			else
-				isurc = true
-			end
-		--ÌØÊâ´¦Àí
-		elseif cmdhead == "+CIFSR" then
-			local s = smatch(data,"%d+%.%d+%.%d+%.%d+")
-			if s ~= nil then
-				interdata = s
-				result = true
-			else
-				isurc = true
-			end
-		--ÌØÊâ´¦Àí
-		elseif cmdhead == "+CIPSEND" or cmdhead == "+CIPCLOSE" then
-			local keystr = cmdhead == "+CIPSEND" and "SEND" or "CLOSE"
-			local lid,res = smatch(data,"(%d), *([%u%d :]+)")
-
-			if lid and res then
-				if (sfind(res,keystr) == 1 or sfind(res,"TCP ERROR") == 1 or sfind(res,"UDP ERROR") == 1 or sfind(data,"DATA ACCEPT")) and (lid == smatch(currcmd,"=(%d)")) then
-					result = true
-					respdata = data
-				else
-					isurc = true
-				end
-			elseif data == "+PDP: DEACT" then
-				result = true
-				respdata = data
-			else
-				isurc = true
-			end		
-		elseif cmdhead=="+SSLINIT" or cmdhead=="+SSLTERM" then
-			local keystr = smatch(cmdhead,"SSL(%w+)")
-			if smatch(data,"^SSL&%d,"..keystr) then
-				respdata = data
-				if smatch(data,"ERROR") then
-					result = false
-				else
-					result = true
-				end
-			else
-				isurc = true
-			end
-		elseif cmdhead=="+SSLCERT" then
-			if smatch(data,"^SSL&%d,INPUT CERT") or smatch(data,"^SSL&%d,CONFIG CERT") then
-				respdata = data
-				if smatch(data,"ERROR") then
-					result = false
-				else
-					result = true
-				end
-			else
-				isurc = true
-			end
-		elseif cmdhead=="+SSLCREATE" or cmdhead=="+SSLCONNECT" or cmdhead=="+SSLSEND" or cmdhead=="+SSLDESTROY" then
-			local keystr = smatch(cmdhead,"SSL(%w+)")
-			local lid,res = smatch(data,"^SSL&(%d),(%w+)")
-			
-			print("ril.ssl",keystr,lid,res,smatch(currcmd,"=(%d)"),smatch(data,"^SSL&%d,(%w+)"))
-			
-			if lid and res then
-				if (lid == smatch(currcmd,"=(%d)")) and (keystr==smatch(data,"^SSL&%d,(%w+)")) then
-					respdata = data
-					if smatch(data,"ERROR") then
-						result = false
-					else
-						result = true
-					end
-				else
-					isurc = true
-				end				
-			else
-				isurc = true
-			end	
-		else
-			isurc = true
-		end
-	end
-	--urc´¦Àí
-	if isurc then
-		urc(data)
-	--Ó¦´ğ´¦Àí
-	elseif result ~= nil then
-		rsp()
-	end
+    log.info("ril.proatc", data)
+    --å¦‚æœå‘½ä»¤çš„åº”ç­”æ˜¯å¤šè¡Œå­—ç¬¦ä¸²æ ¼å¼
+    if interdata and cmdtype == MLINE then
+        --ä¸å‡ºç°OK\r\nï¼Œåˆ™è®¤ä¸ºåº”ç­”è¿˜æœªç»“æŸ
+        if data ~= "OK\r\n" then
+            --å»æ‰æœ€åçš„\r\n
+            if string.find(data, "\r\n", -2) then
+                data = string.sub(data, 1, -3)
+            end
+            --æ‹¼æ¥åˆ°ä¸­é—´æ•°æ®
+            interdata = interdata .. "\r\n" .. data
+            return
+        end
+    end
+    --å¦‚æœå­˜åœ¨â€œæ•°æ®è¿‡æ»¤å™¨â€
+    if urcfilter then
+        data, urcfilter = urcfilter(data)
+    end
+    --å»æ‰æœ€åçš„\r\n
+    if string.find(data, "\r\n", -2) then
+        data = string.sub(data, 1, -3)
+    end
+    --æ•°æ®ä¸ºç©º
+    if data == "" then
+        return
+    end
+    --å½“å‰æ— å‘½ä»¤åœ¨æ‰§è¡Œåˆ™åˆ¤å®šä¸ºurc
+    if currcmd == nil then
+        urc(data)
+        return
+    end
+    
+    local isurc = false
+    
+    --ä¸€äº›ç‰¹æ®Šçš„é”™è¯¯ä¿¡æ¯ï¼Œè½¬åŒ–ä¸ºERRORç»Ÿä¸€å¤„ç†
+    if string.find(data, "^%+CMS ERROR:") or string.find(data, "^%+CME ERROR:") or (data == "CONNECT FAIL" and currcmd and string.match(currcmd, "CIPSTART")) then
+        data = "ERROR"
+    end
+    if sslCreating and data=="+PDP: DEACT" and tonumber(string.match(rtos.get_version(),"Luat_V(%d+)_"))<31 then
+        sys.publish("SSL_DNS_PARSE_PDP_DEACT")
+    end
+    --æ‰§è¡ŒæˆåŠŸçš„åº”ç­”
+    if data == "OK" or data == "SHUT OK" then
+        result = true
+        respdata = data
+    --æ‰§è¡Œå¤±è´¥çš„åº”ç­”
+    elseif data == "ERROR" or data == "NO ANSWER" or data == "NO DIALTONE" then
+        result = false
+        respdata = data
+    --éœ€è¦ç»§ç»­è¾“å…¥å‚æ•°çš„ATå‘½ä»¤åº”ç­”
+    elseif data == "> " then
+        --å‘é€çŸ­ä¿¡
+        if cmdhead == "+CMGS" then
+            log.info("ril.procatc.send", currarg)
+            vwrite(uart.ATC, currarg, "\026")
+        --å‘é€æ•°æ®
+        elseif cmdhead == "+CIPSEND" or cmdhead == "+SSLSEND" or cmdhead == "+SSLCERT" then
+            log.info("ril.procatc.send", "first 200 bytes", currarg:sub(1,200))
+            vwrite(uart.ATC, currarg)
+        else
+            log.error("error promot cmd:", currcmd)
+        end
+    else
+        --æ— ç±»å‹
+        if cmdtype == NORESULT then
+            isurc = true
+        --å…¨æ•°å­—ç±»å‹
+        elseif cmdtype == NUMBERIC then
+            local numstr = string.match(data, "(%x+)")
+            if numstr == data then
+                interdata = data
+            else
+                isurc = true
+            end
+        --å­—ç¬¦ä¸²ç±»å‹
+        elseif cmdtype == STRING then
+            --è¿›ä¸€æ­¥æ£€æŸ¥æ ¼å¼
+            if string.match(data, rspformt or "^.+$") then
+                interdata = data
+            else
+                isurc = true
+            end
+        elseif cmdtype == SLINE or cmdtype == MLINE then
+            if interdata == nil and string.find(data, cmdhead) == 1 then
+                interdata = data
+            else
+                isurc = true
+            end
+        --ç‰¹æ®Šå¤„ç†
+        elseif cmdhead == "+CIFSR" then
+            local s = string.match(data, "%d+%.%d+%.%d+%.%d+")
+            if s ~= nil then
+                interdata = s
+                result = true
+            else
+                isurc = true
+            end
+        --ç‰¹æ®Šå¤„ç†
+        elseif cmdhead == "+CIPSEND" or cmdhead == "+CIPCLOSE" then
+            local keystr = cmdhead == "+CIPSEND" and "SEND" or "CLOSE"
+            local lid, res = string.match(data, "(%d), *([%u%d :]+)")
+            
+            if data:match("^%d, *CLOSED$") then
+                isurc = true
+            elseif lid and res then
+                if (string.find(res, keystr) == 1 or string.find(res, "TCP ERROR") == 1 or string.find(res, "UDP ERROR") == 1 or string.find(data, "DATA ACCEPT")) and (lid == string.match(currcmd, "=(%d)")) then
+                    result = data:match("ERROR") == nil
+                    respdata = data
+                else
+                    isurc = true
+                end
+            elseif data == "+PDP: DEACT" then
+                result = true
+                respdata = data
+            else
+                isurc = true
+            end
+        elseif cmdhead == "+SSLINIT" or cmdhead == "+SSLCERT" or cmdhead == "+SSLCREATE" or cmdhead == "+SSLCONNECT" or cmdhead == "+SSLSEND" or cmdhead == "+SSLDESTROY" or cmdhead == "+SSLTERM" then
+            if string.match(data, "^SSL&%d, *CLOSED") or string.match(data, "^SSL&%d, *ERROR") or string.match(data, "SSL&%d,CONNECT ERROR") then
+                isurc = true
+            elseif string.match(data, "^SSL&%d,") then
+                respdata = data
+                if string.match(data, "ERROR") then
+                    result = false
+                else
+                    result = true
+                end
+                if cmdhead=="+SSLCREATE" then sslCreating=false end
+            else
+                isurc = true
+            end
+        else
+            isurc = true
+        end
+    end
+    --urcå¤„ç†
+    if isurc then
+        urc(data)
+    --åº”ç­”å¤„ç†
+    elseif result ~= nil then
+        rsp()
+    end
 end
 
---ÊÇ·ñÔÚ¶ÁÈ¡ĞéÄâ´®¿ÚÊı¾İ
+--æ˜¯å¦åœ¨è¯»å–è™šæ‹Ÿä¸²å£æ•°æ®
 local readat = false
 
 --[[
-º¯ÊıÃû£ºgetcmd
-¹¦ÄÜ  £º½âÎöÒ»ÌõATÃüÁî
-²ÎÊı  £º
-		item£ºATÃüÁî
-·µ»ØÖµ£ºµ±Ç°ATÃüÁîµÄÄÚÈİ
+å‡½æ•°åï¼šgetcmd
+åŠŸèƒ½  ï¼šè§£æä¸€æ¡ATå‘½ä»¤
+å‚æ•°  ï¼š
+itemï¼šATå‘½ä»¤
+è¿”å›å€¼ï¼šå½“å‰ATå‘½ä»¤çš„å†…å®¹
 ]]
 local function getcmd(item)
-	local cmd,arg,rsp,delay
-	--ÃüÁîÊÇstringÀàĞÍ
-	if type(item) == "string" then
-		--ÃüÁîÄÚÈİ
-		cmd = item
-	--ÃüÁîÊÇtableÀàĞÍ
-	elseif type(item) == "table" then
-		--ÃüÁîÄÚÈİ
-		cmd = item.cmd
-		--ÃüÁî²ÎÊı
-		arg = item.arg
-		--ÃüÁîÓ¦´ğ´¦Àíº¯Êı
-		rsp = item.rsp
-		--ÃüÁîÑÓÊ±Ö´ĞĞÊ±¼ä
-		delay = item.delay
-	else
-		print("getpack unknown item")
-		return
-	end
-	--ÃüÁîÇ°×º
-	head = smatch(cmd,"AT([%+%*]*%u+)")
-
-	if head == nil then
-		print("request error cmd:",cmd)
-		return
-	end
-	--ÕâÁ½¸öÃüÁî±ØĞëÓĞ²ÎÊı
-	if head == "+CMGS" or head == "+CIPSEND" then -- ±ØĞëÓĞ²ÎÊı
-		if arg == nil or arg == "" then
-			print("request error no arg",head)
-			return
-		end
-	end
-
-	--¸³ÖµÈ«¾Ö±äÁ¿
-	currcmd = cmd
-	currarg = arg
-	currsp = rsp
-	curdelay = delay
-	cmdhead = head
-	cmdtype = RILCMD[head] or NORESULT
-	rspformt = formtab[head]
-
-	return currcmd
+    local cmd, arg, rsp, delay
+    --å‘½ä»¤æ˜¯stringç±»å‹
+    if type(item) == "string" then
+        --å‘½ä»¤å†…å®¹
+        cmd = item
+    --å‘½ä»¤æ˜¯tableç±»å‹
+    elseif type(item) == "table" then
+        --å‘½ä»¤å†…å®¹
+        cmd = item.cmd
+        --å‘½ä»¤å‚æ•°
+        arg = item.arg
+        --å‘½ä»¤åº”ç­”å¤„ç†å‡½æ•°
+        rsp = item.rsp
+        --å‘½ä»¤å»¶æ—¶æ‰§è¡Œæ—¶é—´
+        delay = item.delay
+    else
+        log.info("ril.getcmd", "getpack unknown item")
+        return
+    end
+    --å‘½ä»¤å‰ç¼€
+    local head = string.match(cmd, "AT([%+%*]*%u+)")
+    
+    if head == nil then
+        log.error("ril.getcmd", "request error cmd:", cmd)
+        return
+    end
+    --è¿™ä¸¤ä¸ªå‘½ä»¤å¿…é¡»æœ‰å‚æ•°
+    if head == "+CMGS" or head == "+CIPSEND" then -- å¿…é¡»æœ‰å‚æ•°
+        if arg == nil or arg == "" then
+            log.error("ril.getcmd", "request error no arg", head)
+            return
+        end
+    end
+    
+    --èµ‹å€¼å…¨å±€å˜é‡
+    currcmd = cmd
+    currarg = arg
+    currsp = rsp
+    curdelay = delay
+    cmdhead = head
+    cmdtype = RILCMD[head] or NORESULT
+    rspformt = formtab[head]
+    
+    return currcmd
 end
 
 --[[
-º¯ÊıÃû£ºsendat
-¹¦ÄÜ  £º·¢ËÍATÃüÁî
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
+å‡½æ•°åï¼šsendat
+åŠŸèƒ½  ï¼šå‘é€ATå‘½ä»¤
+å‚æ•°  ï¼šæ— 
+è¿”å›å€¼ï¼šæ— 
 ]]
 local function sendat()
-	--ATÍ¨µÀÎ´×¼±¸¾ÍĞ÷¡¢ÕıÔÚ¶ÁÈ¡ĞéÄâ´®¿ÚÊı¾İ¡¢ÓĞATÃüÁîÔÚÖ´ĞĞ»òÕß¶ÓÁĞÎŞÃüÁî¡¢ÕıÑÓÊ±·¢ËÍÄ³ÌõAT
-	if not radioready or readat or currcmd ~= nil or delaying then		
-		return
-	end
-
-	local item
-
-	while true do
-		--¶ÓÁĞÎŞATÃüÁî
-		if #cmdqueue == 0 then
-			return
-		end
-		--¶ÁÈ¡µÚÒ»ÌõÃüÁî
-		item = table.remove(cmdqueue,1)
-		--½âÎöÃüÁî
-		getcmd(item)
-		--ĞèÒªÑÓ³Ù·¢ËÍ
-		if curdelay then
-			--Æô¶¯ÑÓ³Ù·¢ËÍ¶¨Ê±Æ÷
-			sys.timer_start(delayfunc,curdelay)
-			--Çå³ıÈ«¾Ö±äÁ¿
-			currcmd,currarg,currsp,curdelay,cmdhead,cmdtype,rspformt = nil
-			item.delay = nil
-			--ÉèÖÃÑÓ³Ù·¢ËÍ±êÖ¾
-			delaying = true
-			--°ÑÃüÁîÖØĞÂ²åÈëÃüÁî¶ÓÁĞµÄ¶ÓÊ×
-			table.insert(cmdqueue,1,item)
-			return
-		end
-
-		if currcmd ~= nil then
-			break
-		end
-	end
-	--Æô¶¯ATÃüÁîÓ¦´ğ³¬Ê±¶¨Ê±Æ÷
-	if currcmd:match("^AT%+CIPSTART") or currcmd:match("^AT%+CIPSEND") or currcmd:match("^AT%+SSLCREATE") or currcmd:match("^AT%+SSLCONNECT") or currcmd:match("^AT%+SSLSEND") then
-		sys.timer_start(atimeout,DATA_TIMEOUT)
-	else
-		sys.timer_start(atimeout,TIMEOUT)
-	end
-
-	print("sendat:",currcmd)
-	--ÏòĞéÄâ´®¿ÚÖĞ·¢ËÍATÃüÁî
-	vwrite(uart.ATC,currcmd .. "\r")
+    --ATé€šé“æœªå‡†å¤‡å°±ç»ªã€æ­£åœ¨è¯»å–è™šæ‹Ÿä¸²å£æ•°æ®ã€æœ‰ATå‘½ä»¤åœ¨æ‰§è¡Œæˆ–è€…é˜Ÿåˆ—æ— å‘½ä»¤ã€æ­£å»¶æ—¶å‘é€æŸæ¡AT
+    if not radioready or readat or currcmd ~= nil or delaying then
+        return
+    end
+    
+    local item
+    
+    while true do
+        --é˜Ÿåˆ—æ— ATå‘½ä»¤
+        if #cmdqueue == 0 then
+            return
+        end
+        --è¯»å–ç¬¬ä¸€æ¡å‘½ä»¤
+        item = table.remove(cmdqueue, 1)
+        --è§£æå‘½ä»¤
+        getcmd(item)
+        --éœ€è¦å»¶è¿Ÿå‘é€
+        if curdelay then
+            --å¯åŠ¨å»¶è¿Ÿå‘é€å®šæ—¶å™¨
+            sys.timerStart(delayfunc, curdelay)
+            --æ¸…é™¤å…¨å±€å˜é‡
+            currcmd, currarg, currsp, curdelay, cmdhead, cmdtype, rspformt = nil
+            item.delay = nil
+            --è®¾ç½®å»¶è¿Ÿå‘é€æ ‡å¿—
+            delaying = true
+            --æŠŠå‘½ä»¤é‡æ–°æ’å…¥å‘½ä»¤é˜Ÿåˆ—çš„é˜Ÿé¦–
+            table.insert(cmdqueue, 1, item)
+            return
+        end
+        
+        if currcmd ~= nil then
+            break
+        end
+    end
+    --å¯åŠ¨ATå‘½ä»¤åº”ç­”è¶…æ—¶å®šæ—¶å™¨
+    if currcmd:match("^AT%+CIPSTART") or currcmd:match("^AT%+CIPSEND") or currcmd:match("^AT%+SSLCREATE") or currcmd:match("^AT%+SSLCONNECT") or currcmd:match("^AT%+SSLSEND") then
+        sys.timerStart(atimeout,DATA_TIMEOUT)
+    else
+        sys.timerStart(atimeout, TIMEOUT)
+    end
+    
+    if currcmd:match("^AT%+SSLCREATE") then sslCreating=true end
+    
+    log.info("ril.sendat", currcmd)
+    --å‘è™šæ‹Ÿä¸²å£ä¸­å‘é€ATå‘½ä»¤
+    vwrite(uart.ATC, currcmd .. "\r")
 end
 
---[[
-º¯ÊıÃû£ºdelayfunc
-¹¦ÄÜ  £ºÑÓÊ±Ö´ĞĞÄ³ÌõATÃüÁîµÄ¶¨Ê±Æ÷»Øµ÷
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
+-- å»¶æ—¶æ‰§è¡ŒæŸæ¡ATå‘½ä»¤çš„å®šæ—¶å™¨å›è°ƒ
+-- @return æ— 
+-- @usage ril.delayfunc()
 function delayfunc()
-	--Çå³ıÑÓÊ±±êÖ¾
-	delaying = nil
-	--Ö´ĞĞATÃüÁî·¢ËÍ
-	sendat()
+    --æ¸…é™¤å»¶æ—¶æ ‡å¿—
+    delaying = nil
+    --æ‰§è¡ŒATå‘½ä»¤å‘é€
+    sendat()
 end
 
 --[[
-º¯ÊıÃû£ºatcreader
-¹¦ÄÜ  £º¡°ATÃüÁîµÄĞéÄâ´®¿ÚÊı¾İ½ÓÊÕÏûÏ¢¡±µÄ´¦Àíº¯Êı£¬µ±ĞéÄâ´®¿ÚÊÕµ½Êı¾İÊ±£¬»á×ßµ½´Ëº¯ÊıÖĞ
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
+å‡½æ•°åï¼šatcreader
+åŠŸèƒ½  ï¼šâ€œATå‘½ä»¤çš„è™šæ‹Ÿä¸²å£æ•°æ®æ¥æ”¶æ¶ˆæ¯â€çš„å¤„ç†å‡½æ•°ï¼Œå½“è™šæ‹Ÿä¸²å£æ”¶åˆ°æ•°æ®æ—¶ï¼Œä¼šèµ°åˆ°æ­¤å‡½æ•°ä¸­
+å‚æ•°  ï¼šæ— 
+è¿”å›å€¼ï¼šæ— 
 ]]
 local function atcreader()
-	local s
-
-	if not transparentmode then readat = true end
-	--Ñ­»·¶ÁÈ¡ĞéÄâ´®¿ÚÊÕµ½µÄÊı¾İ
-	while true do
-		--Ã¿´Î¶ÁÈ¡Ò»ĞĞ
-		s = vread(uart.ATC,"*l",0)
-		if slen(s) ~= 0 then
-			if transparentmode then
-				--Í¸´«Ä£Ê½ÏÂÖ±½Ó×ª·¢Êı¾İ
-				rcvfunc(s)
-			else
-				--·ÇÍ¸´«Ä£Ê½ÏÂ´¦ÀíÊÕµ½µÄÊı¾İ
-				procatc(s)
-			end
-		else
-			break
-		end
-	end
-	if not transparentmode then
-		readat = false
-		--Êı¾İ´¦ÀíÍêÒÔºó¼ÌĞøÖ´ĞĞATÃüÁî·¢ËÍ
-		sendat()
-	end
+    local s
+    
+    if not transparentmode then readat = true end
+    --å¾ªç¯è¯»å–è™šæ‹Ÿä¸²å£æ”¶åˆ°çš„æ•°æ®
+    while true do
+        --æ¯æ¬¡è¯»å–ä¸€è¡Œ
+        s = vread(uart.ATC, "*l", 0)
+        if string.len(s) ~= 0 then
+            if transparentmode then
+                --é€ä¼ æ¨¡å¼ä¸‹ç›´æ¥è½¬å‘æ•°æ®
+                rcvfunc(s)
+            else
+                --éé€ä¼ æ¨¡å¼ä¸‹å¤„ç†æ”¶åˆ°çš„æ•°æ®
+                procatc(s)
+            end
+        else
+            break
+        end
+    end
+    if not transparentmode then
+        readat = false
+        --æ•°æ®å¤„ç†å®Œä»¥åç»§ç»­æ‰§è¡ŒATå‘½ä»¤å‘é€
+        sendat()
+    end
 end
 
---×¢²á¡°ATÃüÁîµÄĞéÄâ´®¿ÚÊı¾İ½ÓÊÕÏûÏ¢¡±µÄ´¦Àíº¯Êı
-sys.regmsg("atc",atcreader)
-
---[[
-º¯ÊıÃû£ºrequest
-¹¦ÄÜ  £º·¢ËÍATÃüÁîµ½µ×²ãÈí¼ş
-²ÎÊı  £º
-		cmd£ºATÃüÁîÄÚÈİ
-		arg£ºATÃüÁî²ÎÊı£¬ÀıÈçAT+CMGS=12ÃüÁîÖ´ĞĞºó£¬½ÓÏÂÀ´»á·¢ËÍ´Ë²ÎÊı£»AT+CIPSEND=14ÃüÁîÖ´ĞĞºó£¬½ÓÏÂÀ´»á·¢ËÍ´Ë²ÎÊı
-		onrsp£ºATÃüÁîÓ¦´ğµÄ´¦Àíº¯Êı£¬Ö»ÊÇµ±Ç°·¢ËÍµÄATÃüÁîÓ¦´ğÓĞĞ§£¬´¦ÀíÖ®ºó¾ÍÊ§Ğ§ÁË
-		delay£ºÑÓÊ±delayºÁÃëºó£¬²Å·¢ËÍ´ËATÃüÁî
-·µ»ØÖµ£ºÎŞ
-]]
-function request(cmd,arg,onrsp,delay)
-	if transparentmode then return end
-	--²åÈë»º³å¶ÓÁĞ
-	if arg or onrsp or delay or formt then
-		table.insert(cmdqueue,{cmd = cmd,arg = arg,rsp = onrsp,delay = delay})
-	else
-		table.insert(cmdqueue,cmd)
-	end
-	--Ö´ĞĞATÃüÁî·¢ËÍ
-	sendat()
+--- å‘é€ATå‘½ä»¤åˆ°åº•å±‚è½¯ä»¶
+-- @param cmd   ATå‘½ä»¤å†…å®¹
+-- @param arg   ATå‘½ä»¤å‚æ•°ï¼Œä¾‹å¦‚AT+CMGS=12å‘½ä»¤æ‰§è¡Œåï¼Œæ¥ä¸‹æ¥ä¼šå‘é€æ­¤å‚æ•°ï¼›AT+CIPSEND=14å‘½ä»¤æ‰§è¡Œåï¼Œæ¥ä¸‹æ¥ä¼šå‘é€æ­¤å‚æ•°
+-- @param onrsp ATå‘½ä»¤åº”ç­”çš„å¤„ç†å‡½æ•°ï¼Œåªæ˜¯å½“å‰å‘é€çš„ATå‘½ä»¤åº”ç­”æœ‰æ•ˆï¼Œå¤„ç†ä¹‹åå°±å¤±æ•ˆäº†
+-- @param delay å»¶æ—¶delayæ¯«ç§’åï¼Œæ‰å‘é€æ­¤ATå‘½ä»¤
+-- @return æ— 
+-- @usage ril.request("AT+CENG=1,1")
+-- @usage ril.request("AT+CRSM=214,28539,0,0,12,\"64f01064f03064f002fffff\"", nil, crsmResponse)
+function request(cmd, arg, onrsp, delay)
+    if transparentmode then return end
+    --æ’å…¥ç¼“å†²é˜Ÿåˆ—
+    if arg or onrsp or delay or formt then
+        table.insert(cmdqueue, {cmd = cmd, arg = arg, rsp = onrsp, delay = delay})
+    else
+        table.insert(cmdqueue, cmd)
+    end
+    --æ‰§è¡ŒATå‘½ä»¤å‘é€
+    sendat()
 end
 
 --[[
-º¯ÊıÃû£ºsetransparentmode
-¹¦ÄÜ  £ºATÃüÁîÍ¨µÀÉèÖÃÎªÍ¸´«Ä£Ê½
-²ÎÊı  £º
-		fnc£ºÍ¸´«Ä£Ê½ÏÂ£¬ĞéÄâ´®¿ÚÊı¾İ½ÓÊÕµÄ´¦Àíº¯Êı
-·µ»ØÖµ£ºÎŞ
-×¢Òâ£ºÍ¸´«Ä£Ê½ºÍ·ÇÍ¸´«Ä£Ê½£¬Ö»Ö§³Ö¿ª»úµÄµÚÒ»´ÎÉèÖÃ£¬²»Ö§³ÖÖĞÍ¾ÇĞ»»
+å‡½æ•°åï¼šsetransparentmode
+åŠŸèƒ½  ï¼šATå‘½ä»¤é€šé“è®¾ç½®ä¸ºé€ä¼ æ¨¡å¼
+å‚æ•°  ï¼š
+fncï¼šé€ä¼ æ¨¡å¼ä¸‹ï¼Œè™šæ‹Ÿä¸²å£æ•°æ®æ¥æ”¶çš„å¤„ç†å‡½æ•°
+è¿”å›å€¼ï¼šæ— 
+æ³¨æ„ï¼šé€ä¼ æ¨¡å¼å’Œéé€ä¼ æ¨¡å¼ï¼Œåªæ”¯æŒå¼€æœºçš„ç¬¬ä¸€æ¬¡è®¾ç½®ï¼Œä¸æ”¯æŒä¸­é€”åˆ‡æ¢
 ]]
 function setransparentmode(fnc)
-	transparentmode,rcvfunc = true,fnc
+    transparentmode, rcvfunc = true, fnc
 end
 
 --[[
-º¯ÊıÃû£ºsendtransparentdata
-¹¦ÄÜ  £ºÍ¸´«Ä£Ê½ÏÂ·¢ËÍÊı¾İ
-²ÎÊı  £º
-		data£ºÊı¾İ
-·µ»ØÖµ£º³É¹¦·µ»Øtrue£¬Ê§°Ü·µ»Ønil
+å‡½æ•°åï¼šsendtransparentdata
+åŠŸèƒ½  ï¼šé€ä¼ æ¨¡å¼ä¸‹å‘é€æ•°æ®
+å‚æ•°  ï¼š
+dataï¼šæ•°æ®
+è¿”å›å€¼ï¼šæˆåŠŸè¿”å›trueï¼Œå¤±è´¥è¿”å›nil
 ]]
 function sendtransparentdata(data)
-	if not transparentmode then return end
-	vwrite(uart.ATC,data)
-	return true
+    if not transparentmode then return end
+    vwrite(uart.ATC, data)
+    return true
 end
 
 function setDataTimeout(tm)
-    DATA_TIMEOUT = tm
+    DATA_TIMEOUT = (tm<120000 and 120000 or tm)
 end
+
+--æ³¨å†Œâ€œATå‘½ä»¤çš„è™šæ‹Ÿä¸²å£æ•°æ®æ¥æ”¶æ¶ˆæ¯â€çš„å¤„ç†å‡½æ•°
+uart.on(uart.ATC, "receive", atcreader)

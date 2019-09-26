@@ -1,457 +1,232 @@
---[[
-Ä£¿éÃû³Æ£ºÍ¨»°¹ÜÀí
-Ä£¿é¹¦ÄÜ£ººôÈë¡¢ºô³ö¡¢½ÓÌı¡¢¹Ò¶Ï
-Ä£¿é×îºóĞŞ¸ÄÊ±¼ä£º2017.02.20
-]]
+--- æ¨¡å—åŠŸèƒ½ï¼šé€šè¯ç®¡ç†
+-- @module cc
+-- @author openLuat
+-- @license MIT
+-- @copyright openLuat
+-- @release 2017.11.2
 
---¶¨ÒåÄ£¿é,µ¼ÈëÒÀÀµ¿â
-local base = _G
-local string = require"string"
-local table = require"table"
-local sys = require"sys"
-local ril = require"ril"
-local net = require"net"
-local pm = require"pm"
-module(...)
+module(..., package.seeall)
+require"ril"
+require"pm"
 
---¼ÓÔØ³£ÓÃµÄÈ«¾Öº¯ÊıÖÁ±¾µØ
-local ipairs,pairs,print,unpack,type = base.ipairs,base.pairs,base.print,base.unpack,base.type
+--- é€šè¯ä¸­
+CONNECTED = 0
+--- é€šè¯ä¿æŒä¸­
+HOLD = 1
+--- æ­£åœ¨å‘¼å‡º
+DIALING = 2
+ALERTING = 3
+--- æ­£åœ¨å‘¼å…¥
+INCOMING = 4
+WAITING = 5
+--- æ­£åœ¨æŒ‚æ–­é€šè¯
+DISCONNECTING = 98
+--- é€šè¯å·²æŒ‚æ–­
+DISCONNECTED = 99
+
 local req = ril.request
+local publish = sys.publish
 
---µ×²ãÍ¨»°Ä£¿éÊÇ·ñ×¼±¸¾ÍĞ÷£¬true¾ÍĞ÷£¬false»òÕßnilÎ´¾ÍĞ÷
+--åº•å±‚é€šè¯æ¨¡å—æ˜¯å¦å‡†å¤‡å°±ç»ªï¼Œtrueå°±ç»ªï¼Œfalseæˆ–è€…nilæœªå°±ç»ª
 local ccready = false
---Í¨»°´æÔÚ±êÖ¾£¬ÔÚÒÔÏÂ×´Ì¬Ê±Îªtrue£º
---Ö÷½Ğºô³öÖĞ£¬±»½ĞÕñÁåÖĞ£¬Í¨»°ÖĞ
-local callexist = false
---¼ÇÂ¼À´µçºÅÂë±£Ö¤Í¬Ò»µç»°¶à´ÎÕñÁåÖ»ÌáÊ¾Ò»´Î
-local incoming_num = nil 
---½ô¼±ºÅÂë±í
-local emergency_num = {"112", "911", "000", "08", "110", "119", "118", "999"}
---Í¨»°ÁĞ±í
-local oldclcc,clcc = {},{}
---×´Ì¬±ä»¯Í¨Öª»Øµ÷
-local usercbs = {}
+--é€šè¯åˆ—è¡¨
+local call_list = {n= 0}
 
-
---[[
-º¯ÊıÃû£ºprint
-¹¦ÄÜ  £º´òÓ¡½Ó¿Ú£¬´ËÎÄ¼şÖĞµÄËùÓĞ´òÓ¡¶¼»á¼ÓÉÏccÇ°×º
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-local function print(...)
-	base.print("cc",...)
+--- æ˜¯å¦å­˜åœ¨é€šè¯
+-- @return bool result å­˜åœ¨é€šè¯è¿”å›trueï¼Œå¦åˆ™è¿”å›false
+-- @usage result = cc.anyCallExist()
+function anyCallExist()
+    return call_list.n ~= 0
 end
 
---[[
-º¯ÊıÃû£ºdispatch
-¹¦ÄÜ  £ºÖ´ĞĞÃ¿¸öÄÚ²¿ÏûÏ¢¶ÔÓ¦µÄÓÃ»§»Øµ÷
-²ÎÊı  £º
-		evt£ºÏûÏ¢ÀàĞÍ
-		para£ºÏûÏ¢²ÎÊı
-·µ»ØÖµ£ºÎŞ
-]]
-local function dispatch(evt,para)
-	local tag = string.match(evt,"CALL_(.+)")
-	if usercbs[tag] then usercbs[tag](para) end
+--- æŸ¥è¯¢æŸä¸ªå·ç çš„é€šè¯çŠ¶æ€
+-- @string num æŸ¥è¯¢å·ç 
+-- @return number state é€šè¯çŠ¶æ€ï¼ŒçŠ¶æ€å€¼å‚è€ƒæœ¬æ¨¡å—Fieldså®šä¹‰
+-- @usage state = cc.getState('10086')
+function getState(num)
+    return call_list[num] or DISCONNECTED
 end
 
---[[
-º¯ÊıÃû£ºregcb
-¹¦ÄÜ  £º×¢²áÒ»¸ö»òÕß¶à¸öÏûÏ¢µÄÓÃ»§»Øµ÷º¯Êı
-²ÎÊı  £º
-		evt1£ºÏûÏ¢ÀàĞÍ£¬Ä¿Ç°½öÖ§³Ö"READY","INCOMING","CONNECTED","DISCONNECTED","DTMF","ALERTING"
-		cb1£ºÏûÏ¢¶ÔÓ¦µÄÓÃ»§»Øµ÷º¯Êı
-		...£ºevtºÍcb³É¶Ô³öÏÖ
-·µ»ØÖµ£ºÎŞ
-]]
-function regcb(evt1,cb1,...)
-	usercbs[evt1] = cb1
-	local i
-	for i=1,arg.n,2 do
-		usercbs[unpack(arg,i,i)] = unpack(arg,i+1,i+1)
-	end
+--- å‘¼å‡ºç”µè¯
+-- @string num å‘¼å‡ºå·ç 
+-- @number[opt=0] delay å»¶æ—¶delayæ¯«ç§’åï¼Œæ‰å‘èµ·å‘¼å«
+-- @return bool resultï¼Œtrueè¡¨ç¤ºå…è®¸å‘é€atå‘½ä»¤æ‹¨å·å¹¶ä¸”å‘é€atï¼Œfalseè¡¨ç¤ºä¸å…è®¸atå‘½ä»¤æ‹¨å·
+-- @usage cc.dial('10086')
+function dial(num, delay)
+    if num == "" or num == nil then return false end
+    pm.wake("cc")
+    req(string.format("%s%s;", "ATD", num), nil, nil, delay)
+    call_list[num] = DIALING
+    return true
 end
 
---[[
-º¯ÊıÃû£ºderegcb
-¹¦ÄÜ  £º³·Ïú×¢²áÒ»¸ö»òÕß¶à¸öÏûÏ¢µÄÓÃ»§»Øµ÷º¯Êı
-²ÎÊı  £º
-		evt1£ºÏûÏ¢ÀàĞÍ£¬Ä¿Ç°½öÖ§³Ö"READY","INCOMING","CONNECTED","DISCONNECTED","DTMF","ALERTING"
-		...£º0¸ö»òÕß¶à¸öevt
-·µ»ØÖµ£ºÎŞ
-]]
-function deregcb(evt1,...)
-	usercbs[evt1] = nil
-	local i
-	for i=1,arg.n do
-		usercbs[unpack(arg,i,i)] = nil
-	end
+--- æŒ‚æ–­é€šè¯
+-- @string num å·ç ï¼Œè‹¥æŒ‡å®šå·ç é€šè¯çŠ¶æ€ä¸å¯¹ åˆ™ç›´æ¥é€€å‡º ä¸ä¼šæ‰§è¡ŒæŒ‚æ–­ï¼Œè‹¥æŒ‚æ–­æ—¶ä¼šæŒ‚æ–­æ‰€æœ‰ç”µè¯
+-- @return nil
+-- @usage cc.hangUp('10086')
+function hangUp(num)
+    if call_list[num] == DISCONNECTING or call_list[num] == DISCONNECTED then return end
+    if audio and type(audio.stop)=="function" then audio.stop() end
+    req("AT+CHUP")
+    call_list[num] = DISCONNECTING
 end
 
---[[
-º¯ÊıÃû£ºisemergencynum
-¹¦ÄÜ  £º¼ì²éºÅÂëÊÇ·ñÎª½ô¼±ºÅÂë
-²ÎÊı  £º
-		num£º´ı¼ì²éºÅÂë
-·µ»ØÖµ£ºtrueÎª½ô¼±ºÅÂë£¬false²»Îª½ô¼±ºÅÂë
-]]
-local function isemergencynum(num)
-	for k,v in ipairs(emergency_num) do
-		if v == num then
-			return true
-		end
-	end
-	return false
+--- æ¥å¬ç”µè¯
+-- @string num å·ç ï¼Œè‹¥æŒ‡å®šå·ç é€šè¯çŠ¶æ€ä¸å¯¹ åˆ™ç›´æ¥é€€å‡º ä¸ä¼šæ¥é€š
+-- @return nil
+-- @usage cc.accept('10086')
+function accept(num)
+    if call_list[num] ~= INCOMING then return end
+    if audio and type(audio.stop)=="function" then audio.stop() end
+    req("ATA")
+    call_list[num] = CONNECTING
 end
 
---[[
-º¯ÊıÃû£ºclearincomingflag
-¹¦ÄÜ  £ºÇå³ıÀ´µçºÅÂë
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-local function clearincomingflag()
-	incoming_num = nil
+--- é€šè¯ä¸­å‘é€å£°éŸ³åˆ°å¯¹ç«¯,å¿…é¡»æ˜¯12.2K AMRæ ¼å¼
+-- @string data 12.2K AMRæ ¼å¼çš„æ•°æ®
+-- @bool[opt=nil] loop æ˜¯å¦å¾ªç¯å‘é€ï¼Œtrueä¸ºå¾ªç¯ï¼Œå…¶ä½™ä¸ºä¸å¾ªç¯
+-- @bool[opt=nil] downLinkPlay å£°éŸ³æ˜¯å¦åœ¨æœ¬ç«¯æ’­æ”¾ï¼Œtrueä¸ºæ’­æ”¾ï¼Œå…¶ä½™ä¸ºä¸æ’­æ”¾
+-- @return bool result trueä¸ºæˆåŠŸï¼Œfalseä¸ºå¤±è´¥
+-- @usage
+-- cc.transVoice("#!AMR\010\060*********")
+-- cc.transVoice("#!AMR\010\060*********",true)
+-- cc.transVoice("#!AMR\010\060*********",true,true)
+function transVoice(data, loop, downLinkPlay)
+    local f = io.open("/RecDir/rec000", "wb")
+
+    if f == nil then
+        log.error("transVoice:open file error")
+        return false
+    end
+
+    -- æœ‰æ–‡ä»¶å¤´å¹¶ä¸”æ˜¯12.2Kå¸§
+    if string.sub(data, 1, 7) == "#!AMR\010\060" then
+        -- æ— æ–‡ä»¶å¤´ä¸”æ˜¯12.2Kå¸§
+    elseif string.byte(data, 1) == 0x3C then
+        f:write("#!AMR\010")
+    else
+        log.error('cc.transVoice', 'must be 12.2K AMR')
+        return false
+    end
+
+    f:write(data)
+    f:close()
+
+    req(string.format("AT+AUDREC=%d,%d,2,0,50000", downLinkPlay == true and 1 or 0, loop == true and 1 or 0))
+
+    return true
 end
 
---[[
-º¯ÊıÃû£ºdiscevt
-¹¦ÄÜ  £ºÍ¨»°½áÊøÏûÏ¢´¦Àí
-²ÎÊı  £º
-		reason£º½áÊøÔ­Òò
-·µ»ØÖµ£ºÎŞ
-]]
-local function discevt(reason)
-	callexist = false -- Í¨»°½áÊø Çå³ıÍ¨»°×´Ì¬±êÖ¾
-	if incoming_num then sys.timer_start(clearincomingflag,1000) end
-	pm.sleep("cc")
-	--²úÉúÄÚ²¿ÏûÏ¢CALL_DISCONNECTED£¬Í¨ÖªÓÃ»§³ÌĞòÍ¨»°½áÊø
-	dispatch("CALL_DISCONNECTED",reason)
-	sys.timer_stop(qrylist,"MO")
+--- è®¾ç½®dtmfæ£€æµ‹æ˜¯å¦ä½¿èƒ½ä»¥åŠçµæ•åº¦
+-- @bool[opt=nil] enable trueä½¿èƒ½ï¼Œfalseæˆ–è€…nilä¸ºä¸ä½¿èƒ½
+-- @number[opt=3] sens çµæ•åº¦ï¼Œæœ€çµæ•ä¸º1
+-- @return nil
+-- @usage cc.dtmfDetect(true)
+function dtmfDetect(enable, sens)
+    if enable == true then
+        if sens then
+            req("AT+DTMFDET=2,1," .. sens)
+        else
+            req("AT+DTMFDET=2,1,3")
+        end
+    end
+
+    req("AT+DTMFDET=" .. (enable and 1 or 0))
 end
 
---[[
-º¯ÊıÃû£ºanycallexist
-¹¦ÄÜ  £ºÊÇ·ñ´æÔÚÍ¨»°
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£º´æÔÚÍ¨»°·µ»Øtrue£¬·ñÔò·µ»Øfalse
-]]
-function anycallexist()
-	return callexist
+--- å‘é€dtmfåˆ°å¯¹ç«¯
+-- @string str dtmfå­—ç¬¦ä¸²ï¼Œä»…æ”¯æŒæ•°å­—ã€ABCD*#
+-- @number[opt=100] playtime æ¯ä¸ªdtmfæ’­æ”¾æ—¶é—´ï¼Œå•ä½æ¯«ç§’
+-- @number[opt=100] intvl ä¸¤ä¸ªdtmfé—´éš”ï¼Œå•ä½æ¯«ç§’
+-- @return nil
+-- @usage cc.sendDtmf("123")
+function sendDtmf(str, playtime, intvl)
+    if string.match(str, "([%dABCD%*#]+)") ~= str then
+        log.error("sendDtmf: illegal string " .. str)
+        return false
+    end
+
+    playtime = playtime and playtime or 100
+    intvl = intvl and intvl or 100
+
+    req("AT+SENDSOUND=" .. string.format("\"%s\",%d,%d", str, playtime, intvl))
 end
 
---[[
-º¯ÊıÃû£ºqrylist
-¹¦ÄÜ  £º²éÑ¯Í¨»°ÁĞ±í
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-function qrylist()
-	oldclcc = clcc
-	clcc = {}
-	req("AT+CLCC")
-end
-
-local function proclist()
-	local k,v,isactive
-	for k,v in pairs(clcc) do
-		if v.sta == "0" then isactive = true break end
-	end
-	if isactive and #clcc > 1 then
-		for k,v in pairs(clcc) do
-			if v.sta ~= "0" then req("AT+CHLD=1"..v.id) end			
-		end
-	end
-	
-	if usercbs["ALERTING"] and #clcc >= 1 then
-		for k,v in pairs(clcc) do
-			if v.sta == "3" then
-				--[[dispatch("CALL_ALERTING")
-				break]]
-				for m,n in pairs(oldclcc) do
-					if v.id==n.id and v.dir==n.dir and n.sta~="3" then
-						dispatch("CALL_ALERTING")
-						break
-					end
-				end
-			end
-		end
-	end
-end
-
---[[
-º¯ÊıÃû£ºdial
-¹¦ÄÜ  £ººô½ĞÒ»¸öºÅÂë
-²ÎÊı  £º
-		number£ººÅÂë
-		delay£ºÑÓÊ±delayºÁÃëºó£¬²Å·¢ËÍatÃüÁîºô½Ğ£¬Ä¬ÈÏ²»ÑÓÊ±
-·µ»ØÖµ£ºtrue±íÊ¾ÔÊĞí·¢ËÍatÃüÁî²¦ºÅ²¢ÇÒ·¢ËÍat£¬false±íÊ¾²»ÔÊĞíatÃüÁî²¦ºÅ
-]]
-function dial(number,delay)
-	if number == "" or number == nil then
-		return false
-	end
-
-	if ccready == false and not isemergencynum(number) then
-		return false
-	end
-
-	pm.wake("cc")
-	req(string.format("%s%s;","ATD",number),nil,nil,delay)
-	callexist = true -- Ö÷½Ğºô³ö
-
-	return true
-end
-
---[[
-º¯ÊıÃû£ºhangupnxt
-¹¦ÄÜ  £ºÖ÷¶¯¹Ò¶ÏËùÓĞÍ¨»°
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-local function hangupnxt()
-	req("AT+CHUP")
-end
-
---[[
-º¯ÊıÃû£ºhangup
-¹¦ÄÜ  £ºÖ÷¶¯¹Ò¶ÏËùÓĞÍ¨»°
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-function hangup()
-	--Èç¹û´æÔÚaudioÄ£¿é
-	if audio and type(audio)=="table" and audio.play then
-		--ÏÈÍ£Ö¹ÒôÆµ²¥·Å
-		sys.dispatch("AUDIO_STOP_REQ",hangupnxt)
-	else
-		hangupnxt()
-	end
-end
-
---[[
-º¯ÊıÃû£ºacceptnxt
-¹¦ÄÜ  £º½ÓÌıÀ´µç
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-local function acceptnxt()
-	req("ATA")
-	pm.wake("cc")
-end
-
---[[
-º¯ÊıÃû£ºaccept
-¹¦ÄÜ  £º½ÓÌıÀ´µç
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-function accept()
-	--Èç¹û´æÔÚaudioÄ£¿é
-	if audio and type(audio)=="table" and audio.play then
-		--ÏÈÍ£Ö¹ÒôÆµ²¥·Å
-		sys.dispatch("AUDIO_STOP_REQ",acceptnxt)
-	else
-		acceptnxt()
-	end		
-end
-
---[[
-º¯ÊıÃû£ºtransvoice
-¹¦ÄÜ  £ºÍ¨»°ÖĞ·¢ËÍÉùÒôµ½¶Ô¶Ë,±ØĞëÊÇ12.2K AMR¸ñÊ½
-²ÎÊı  £º
-·µ»ØÖµ£ºtrueÎª³É¹¦£¬falseÎªÊ§°Ü
-]]
-function transvoice(data,loop,loop2)
-	local f = io.open("/RecDir/rec000","wb")
-
-	if f == nil then
-		print("transvoice:open file error")
-		return false
-	end
-
-	-- ÓĞÎÄ¼şÍ·²¢ÇÒÊÇ12.2KÖ¡
-	if string.sub(data,1,7) == "#!AMR\010\060" then
-	-- ÎŞÎÄ¼şÍ·ÇÒÊÇ12.2KÖ¡
-	elseif string.byte(data,1) == 0x3C then
-		f:write("#!AMR\010")
-	else
-		print("transvoice:must be 12.2K AMR")
-		return false
-	end
-
-	f:write(data)
-	f:close()
-
-	req(string.format("AT+AUDREC=%d,%d,2,0,50000",loop2 == true and 1 or 0,loop == true and 1 or 0))
-
-	return true
-end
-
---[[
-º¯ÊıÃû£ºdtmfdetect
-¹¦ÄÜ  £ºÉèÖÃdtmf¼ì²âÊÇ·ñÊ¹ÄÜÒÔ¼°ÁéÃô¶È
-²ÎÊı  £º
-		enable£ºtrueÊ¹ÄÜ£¬false»òÕßnilÎª²»Ê¹ÄÜ
-		sens£ºÁéÃô¶È£¬Ä¬ÈÏ3£¬×îÁéÃôÎª1
-·µ»ØÖµ£ºÎŞ
-]]
-function dtmfdetect(enable,sens)
-	if enable == true then
-		if sens then
-			req("AT+DTMFDET=2,1," .. sens)
-		else
-			req("AT+DTMFDET=2,1,3")
-		end
-	end
-
-	req("AT+DTMFDET="..(enable and 1 or 0))
-end
-
---[[
-º¯ÊıÃû£ºsenddtmf
-¹¦ÄÜ  £º·¢ËÍdtmfµ½¶Ô¶Ë
-²ÎÊı  £º
-		str£ºdtmf×Ö·û´®
-		playtime£ºÃ¿¸ödtmf²¥·ÅÊ±¼ä£¬µ¥Î»ºÁÃë£¬Ä¬ÈÏ100
-		intvl£ºÁ½¸ödtmf¼ä¸ô£¬µ¥Î»ºÁÃë£¬Ä¬ÈÏ100
-·µ»ØÖµ£ºÎŞ
-]]
-function senddtmf(str,playtime,intvl)
-	if string.match(str,"([%dABCD%*#]+)") ~= str then
-		print("senddtmf: illegal string "..str)
-		return false
-	end
-
-	playtime = playtime and playtime or 100
-	intvl = intvl and intvl or 100
-
-	req("AT+SENDSOUND="..string.format("\"%s\",%d,%d",str,playtime,intvl))
-end
-
-local dtmfnum = {[71] = "Hz1000",[69] = "Hz1400",[70] = "Hz2300"}
-
---[[
-º¯ÊıÃû£ºparsedtmfnum
-¹¦ÄÜ  £ºdtmf½âÂë£¬½âÂëºó£¬»á²úÉúÒ»¸öÄÚ²¿ÏûÏ¢AUDIO_DTMF_DETECT£¬Ğ¯´ø½âÂëºóµÄDTMF×Ö·û
-²ÎÊı  £º
-		data£ºdtmf×Ö·û´®Êı¾İ
-·µ»ØÖµ£ºÎŞ
-]]
+local dtmfnum = { [71] = "Hz1000", [69] = "Hz1400", [70] = "Hz2300" }
 local function parsedtmfnum(data)
-	local n = base.tonumber(string.match(data,"(%d+)"))
-	local dtmf
+    local n = tonumber(string.match(data, "(%d+)"))
+    local dtmf
 
-	if (n >= 48 and n <= 57) or (n >=65 and n <= 68) or n == 42 or n == 35 then
-		dtmf = string.char(n)
-	else
-		dtmf = dtmfnum[n]
-	end
+    if (n >= 48 and n <= 57) or (n >= 65 and n <= 68) or n == 42 or n == 35 then
+        dtmf = string.char(n)
+    else
+        dtmf = dtmfnum[n]
+    end
 
-	if dtmf then
-		dispatch("CALL_DTMF",dtmf)
-	end
+    if dtmf then
+        publish("CALL_DTMF_DETECT", dtmf) -- é€šè¯ä¸­dtmfè§£ç ä¼šäº§ç”Ÿæ¶ˆæ¯AUDIO_DTMF_DETECTï¼Œæ¶ˆæ¯æ•°æ®ä¸ºDTMFå­—ç¬¦
+    end
 end
 
---[[
-º¯ÊıÃû£ºccurc
-¹¦ÄÜ  £º±¾¹¦ÄÜÄ£¿éÄÚ¡°×¢²áµÄµ×²ãcoreÍ¨¹ıĞéÄâ´®¿ÚÖ÷¶¯ÉÏ±¨µÄÍ¨Öª¡±µÄ´¦Àí
-²ÎÊı  £º
-		data£ºÍ¨ÖªµÄÍêÕû×Ö·û´®ĞÅÏ¢
-		prefix£ºÍ¨ÖªµÄÇ°×º
-·µ»ØÖµ£ºÎŞ
-]]
-local function ccurc(data,prefix)
-	--µ×²ãÍ¨»°Ä£¿é×¼±¸¾ÍĞ÷
-	if data == "CALL READY" then
-		ccready = true
-		dispatch("CALL_READY")
-		req("AT+CCWA=1")
-	--Í¨»°½¨Á¢Í¨Öª
-	elseif data == "CONNECT" then
-		qrylist()		
-		dispatch("CALL_CONNECTED")
-		sys.timer_stop(qrylist,"MO")
-		--ÏÈÍ£Ö¹ÒôÆµ²¥·Å
-		sys.dispatch("AUDIO_STOP_REQ")
-	--Í¨»°¹Ò¶ÏÍ¨Öª
-	elseif data == "NO CARRIER" or data == "BUSY" or data == "NO ANSWER" then
-		qrylist()
-		discevt(data)
-	--À´µçÕñÁå
-	elseif prefix == "+CLIP" then
-		qrylist()
-		local number = string.match(data,"\"(%+*%d*)\"",string.len(prefix)+1)
-		callexist = true -- ±»½ĞÕñÁå
-		if incoming_num ~= number then
-			incoming_num = number
-			dispatch("CALL_INCOMING",number)
-		end
-	elseif prefix == "+CCWA" then
-		qrylist()
-	--Í¨»°ÁĞ±íĞÅÏ¢
-	elseif prefix == "+CLCC" then
-		local id,dir,sta = string.match(data,"%+CLCC:%s*(%d+),(%d),(%d)")
-		if id then
-			table.insert(clcc,{id=id,dir=dir,sta=sta})
-			proclist()
-		end
-	--DTMF½ÓÊÕ¼ì²â
-	elseif prefix == "+DTMFDET" then
-		parsedtmfnum(data)
-	end
+local function ccurc(data, prefix)
+    if data == "CALL READY" then --åº•å±‚é€šè¯æ¨¡å—å‡†å¤‡å°±ç»ª
+        ccready = true
+        publish("CALL_READY")
+        req("AT+CCWA=1")
+    elseif prefix == "+DTMFDET" then
+        parsedtmfnum(data)
+    else
+        req('AT+CLCC')
+        if data == "CONNECT" and audio and type(audio.stop)=="function" then audio.stop() end --å…ˆåœæ­¢éŸ³é¢‘æ’­æ”¾
+    end
 end
 
---[[
-º¯ÊıÃû£ºccrsp
-¹¦ÄÜ  £º±¾¹¦ÄÜÄ£¿éÄÚ¡°Í¨¹ıĞéÄâ´®¿Ú·¢ËÍµ½µ×²ãcoreÈí¼şµÄATÃüÁî¡±µÄÓ¦´ğ´¦Àí
-²ÎÊı  £º
-		cmd£º´ËÓ¦´ğ¶ÔÓ¦µÄATÃüÁî
-		success£ºATÃüÁîÖ´ĞĞ½á¹û£¬true»òÕßfalse
-		response£ºATÃüÁîµÄÓ¦´ğÖĞµÄÖ´ĞĞ½á¹û×Ö·û´®
-		intermediate£ºATÃüÁîµÄÓ¦´ğÖĞµÄÖĞ¼äĞÅÏ¢
-·µ»ØÖµ£ºÎŞ
-]]
-local function ccrsp(cmd,success,response,intermediate)
-	local prefix = string.match(cmd,"AT(%+*%u+)")
-	--²¦ºÅÓ¦´ğ
-	if prefix == "D" then
-		if not success then
-			discevt("CALL_FAILED")
-		else
-			if usercbs["ALERTING"] then sys.timer_loop_start(qrylist,1000,"MO") end
-		end
-	--¹Ò¶ÏËùÓĞÍ¨»°Ó¦´ğ
-	elseif prefix == "+CHUP" then
-		discevt("LOCAL_HANG_UP")
-	--½ÓÌıÀ´µçÓ¦´ğ
-	elseif prefix == "A" then
-		incoming_num = nil
-		dispatch("CALL_CONNECTED")
-		sys.timer_stop(qrylist,"MO")
-	end
-	qrylist()
-end
+local function ccrsp() req('AT+CLCC') end
 
---×¢²áÒÔÏÂÍ¨ÖªµÄ´¦Àíº¯Êı
-ril.regurc("CALL READY",ccurc)
-ril.regurc("CONNECT",ccurc)
-ril.regurc("NO CARRIER",ccurc)
-ril.regurc("NO ANSWER",ccurc)
-ril.regurc("BUSY",ccurc)
-ril.regurc("+CLIP",ccurc)
-ril.regurc("+CLCC",ccurc)
-ril.regurc("+CCWA",ccurc)
-ril.regurc("+DTMFDET",ccurc)
---×¢²áÒÔÏÂATÃüÁîµÄÓ¦´ğ´¦Àíº¯Êı
-ril.regrsp("D",ccrsp)
-ril.regrsp("A",ccrsp)
-ril.regrsp("+CHUP",ccrsp)
-ril.regrsp("+CHLD",ccrsp)
+--æ³¨å†Œä»¥ä¸‹é€šçŸ¥çš„å¤„ç†å‡½æ•°
+ril.regUrc("CALL READY", ccurc)
+ril.regUrc("CONNECT", ccurc)
+ril.regUrc("NO CARRIER", ccurc)
+ril.regUrc("NO ANSWER", ccurc)
+ril.regUrc("BUSY", ccurc)
+ril.regUrc("+CLIP", ccurc)
+ril.regUrc("+CCWA", ccurc)
+ril.regUrc("+DTMFDET", ccurc)
+--æ³¨å†Œä»¥ä¸‹ATå‘½ä»¤çš„åº”ç­”å¤„ç†å‡½æ•°
+ril.regRsp("D", ccrsp)
+ril.regRsp("A", ccrsp)
+ril.regRsp("+CHUP", ccrsp)
+ril.regRsp("+CHLD", ccrsp)
+ril.regRsp("+CLCC", function(cmd, success, response, intermediate)
+    if success then
+        local new = {n = 0 }
+        if intermediate and intermediate:len() > 0 then
+            for id, dir, stat, num in intermediate:gmatch('%+CLCC:%s*(%d+),(%d),(%d),%d,%d,"([^"]*)".-\r\n') do
+                stat = tonumber(stat)
+                if stat == WAITING then
+                    req('AT+CHLD=1' .. id)
+                    return
+                end
+                if call_list[num] ~= stat then
+                    if stat == INCOMING or stat == CONNECTED then
+                        pm.wake('cc')
+                        publish(stat == INCOMING and 'CALL_INCOMING' or 'CALL_CONNECTED', num)
+                    end
+                end
+                new[num] = stat
+                new.n = new.n + 1
+            end
+        end
+        call_list = new
+        if new.n == 0 then
+            publish('CALL_DISCONNECTED')
+            pm.sleep('cc')
+        end
+    end
+end)
 
---¿ªÆô²¦ºÅÒô,Ã¦Òô¼ì²â
-req("ATX4") 
---¿ªÆôÀ´µçurcÉÏ±¨
+--å¼€å¯æ‹¨å·éŸ³,å¿™éŸ³æ£€æµ‹
+req("ATX4")
+--å¼€å¯æ¥ç”µurcä¸ŠæŠ¥
 req("AT+CLIP=1")
-dtmfdetect(true)
+req("ATS7=60")

@@ -1,833 +1,405 @@
---[[
-Ä£¿éÃû³Æ£º³ÌĞòÔËĞĞ¿ò¼Ü
-Ä£¿é¹¦ÄÜ£º³õÊ¼»¯£¬³ÌĞòÔËĞĞ¿ò¼Ü¡¢ÏûÏ¢·Ö·¢´¦Àí¡¢¶¨Ê±Æ÷½Ó¿Ú
-Ä£¿é×îºóĞŞ¸ÄÊ±¼ä£º2017.02.17
-]]
+--- æ¨¡å—åŠŸèƒ½ï¼šLuatåç¨‹è°ƒåº¦æ¡†æ¶
+-- @module sys
+-- @author openLuat
+-- @license MIT
+-- @copyright openLuat
+-- @release 2017.9.13
+require "utils"
+require "log"
+require "patch"
+module(..., package.seeall)
 
---¶¨ÒåÄ£¿é,µ¼ÈëÒÀÀµ¿â
-require"patch"
-local base = _G
-local table = require"table"
-local rtos = require"rtos"
-local uart = require"uart"
-local io = require"io"
-local os = require"os"
-local string = require"string"
-module(...,package.seeall)
+-- libè„šæœ¬ç‰ˆæœ¬å·ï¼Œåªè¦libä¸­çš„ä»»ä½•ä¸€ä¸ªè„šæœ¬åšäº†ä¿®æ”¹ï¼Œéƒ½éœ€è¦æ›´æ–°æ­¤ç‰ˆæœ¬å·
+SCRIPT_LIB_VER = "2.3.4"
 
---¼ÓÔØ³£ÓÃµÄÈ«¾Öº¯ÊıÖÁ±¾µØ
-local print = base.print
-local unpack = base.unpack
-local ipairs = base.ipairs
-local type = base.type
-local pairs = base.pairs
-local assert = base.assert
-local tonumber = base.tonumber
+-- TaskIDæœ€å¤§å€¼
+local TASK_TIMER_ID_MAX = 0x1FFFFFFF
+-- msgId æœ€å¤§å€¼(è¯·å‹¿ä¿®æ”¹å¦åˆ™ä¼šå‘ç”ŸmsgIdç¢°æ’çš„å±é™©)
+local MSG_TIMER_ID_MAX = 0x7FFFFFFF
 
---lib½Å±¾°æ±¾ºÅ£¬Ö»ÒªlibÖĞµÄÈÎºÎÒ»¸ö½Å±¾×öÁËĞŞ¸Ä£¬¶¼ĞèÒª¸üĞÂ´Ë°æ±¾ºÅ
-SCRIPT_LIB_VER = "1.2.3"
-
---ÊÇ·ñÔÊĞí¡°½Å±¾Òì³£Ê± »òÕß ½Å±¾µ÷ÓÃsys.restart½Ó¿ÚÊ±¡±µÄÖØÆô
---ÊÇ·ñÓĞ¹ÒÆğµÄµÈ´ıÖØÆôµÄÊÂ¼ş
---ÊÇ·ñ´æÔÚluaÔËĞĞÆÚ¼äµÄÓï·¨´íÎó
-local restartflg,restartpending,luarunerr = 0,false,0
-
---luaÔËĞĞ³ö´íÊ±£¬ÊÇ·ñ»ØÍËÎª±¾µØÉÕĞ´µÄ°æ±¾
-local sRestoreFlag = true
-
---¡°ÊÇ·ñĞèÒªË¢ĞÂ½çÃæ¡±µÄ±êÖ¾£¬ÓĞGUIµÄÏîÄ¿²Å»áÓÃµ½´Ë±êÖ¾
-local refreshflag = false
---[[
-º¯ÊıÃû£ºrefresh
-¹¦ÄÜ  £ºÉèÖÃ½çÃæË¢ĞÂ±êÖ¾£¬ÓĞGUIµÄÏîÄ¿²Å»áÓÃµ½´Ë½Ó¿Ú
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-function refresh()
-	refreshflag = true
-end
-
---¶¨Ê±Æ÷Ö§³ÖµÄµ¥²½×î´óÊ±³¤£¬µ¥Î»ºÁÃë
-local MAXMS = (0x7fffffff-(0x7fffffff%17))/17
---¶¨Ê±Æ÷id
-local uniquetid = 0
---¶¨Ê±Æ÷id±í
-local tpool = {}
---¶¨Ê±Æ÷²ÎÊı±í
+-- ä»»åŠ¡å®šæ—¶å™¨id
+local taskTimerId = 0
+-- æ¶ˆæ¯å®šæ—¶å™¨id
+local msgId = TASK_TIMER_ID_MAX
+-- å®šæ—¶å™¨idè¡¨
+local timerPool = {}
+local taskTimerPool = {}
+--æ¶ˆæ¯å®šæ—¶å™¨å‚æ•°è¡¨
 local para = {}
---¶¨Ê±Æ÷ÊÇ·ñÑ­»·±í
+--å®šæ—¶å™¨æ˜¯å¦å¾ªç¯è¡¨
 local loop = {}
---lprfun£ºÓÃ»§×Ô¶¨ÒåµÄ¡°µÍµç¹Ø»ú´¦Àí³ÌĞò¡±
---lpring£ºÊÇ·ñÒÑ¾­Æô¶¯×Ô¶¯¹Ø»ú¶¨Ê±Æ÷
-local lprfun,lpring
---´íÎóĞÅÏ¢ÎÄ¼şÒÔ¼°´íÎóĞÅÏ¢ÄÚÈİ
-local LIB_ERR_FILE,liberr,extliberr = "/lib_err.txt",""
---¹¤×÷Ä£Ê½
---SIMPLE_MODE£º¼òµ¥Ä£Ê½£¬Ä¬ÈÏ²»»á¿ªÆô¡°Ã¿Ò»·ÖÖÓ²úÉúÒ»¸öÄÚ²¿ÏûÏ¢¡±¡¢¡°¶¨Ê±²éÑ¯csq¡±¡¢¡°¶¨Ê±²éÑ¯ceng¡±µÄ¹¦ÄÜ
---FULL_MODE£ºÍêÕûÄ£Ê½£¬Ä¬ÈÏ»á¿ªÆô¡°Ã¿Ò»·ÖÖÓ²úÉúÒ»¸öÄÚ²¿ÏûÏ¢¡±¡¢¡°¶¨Ê±²éÑ¯csq¡±¡¢¡°¶¨Ê±²éÑ¯ceng¡±µÄ¹¦ÄÜ
-SIMPLE_MODE,FULL_MODE = 0,1
---Ä¬ÈÏÎªÍêÕûÄ£Ê½
-local workmode = FULL_MODE
+--luaè„šæœ¬è¿è¡Œå‡ºé”™æ—¶ï¼Œæ˜¯å¦å›é€€ä¸ºæœ¬åœ°çƒ§å†™çš„ç‰ˆæœ¬
+local sRollBack = true
 
---[[
-º¯ÊıÃû£ºtimerfnc
-¹¦ÄÜ  £º´¦Àíµ×²ãcoreÉÏ±¨µÄÍâ²¿¶¨Ê±Æ÷ÏûÏ¢
-²ÎÊı  £º
-		tid£º¶¨Ê±Æ÷id
-·µ»ØÖµ£ºÎŞ
-]]
-local function timerfnc(tid)
-	--¶¨Ê±Æ÷idÓĞĞ§
-	if tpool[tid] ~= nil then
-		--´Ë¶¨Ê±Æ÷µÄ»Øµ÷º¯Êı
-		local cb = tpool[tid]
-		--Èç¹ûÊ±³¤³¬¹ıµ¥²½Ö§³ÖµÄ×î´óÊ±³¤£¬Ôò²ğ·ÖÎª¼¸¸ö¶¨Ê±Æ÷
-		if type(tpool[tid]) == "table" then
-			local tval = tpool[tid]
-			tval.times = tval.times+1
-			--²ğ·ÖµÄ¼¸¸ö¶¨Ê±Æ÷»¹Î´Ö´ĞĞÍê±Ï£¬¼ÌĞøÖ´ĞĞÏÂÒ»¸ö
-			if tval.times < tval.total then
-				rtos.timer_start(tid,tval.step)
-				return
-			end
-			cb = tval.cb
-		end
-		--Èç¹û²»ÊÇÑ­»·¶¨Ê±Æ÷£¬´Ó¶¨Ê±Æ÷id±íÖĞÇå³ı´Ë¶¨Ê±Æ÷idÎ»ÖÃµÄÄÚÈİ
-		if not loop[tid] then tpool[tid] = nil end
-		--´æÔÚ×Ô¶¨Òå¿É±ä²ÎÊı
-		if para[tid] ~= nil then
-			local pval = para[tid]
-			--Èç¹û²»ÊÇÑ­»·¶¨Ê±Æ÷£¬´Ó¶¨Ê±Æ÷²ÎÊı±íÖĞÇå³ı´Ë¶¨Ê±Æ÷idÎ»ÖÃµÄÄÚÈİ
-			if not loop[tid] then para[tid] = nil end
-			--Ö´ĞĞ¶¨Ê±Æ÷»Øµ÷º¯Êı
-			cb(unpack(pval))
-		--²»´æÔÚ×Ô¶¨Òå¿É±ä²ÎÊı
-		else
-			--Ö´ĞĞ¶¨Ê±Æ÷»Øµ÷º¯Êı
-			cb()
-		end
-		--Èç¹ûÊÇÑ­»·¶¨Ê±Æ÷£¬¼ÌĞøÆô¶¯´Ë¶¨Ê±Æ÷
-		if loop[tid] then rtos.timer_start(tid,loop[tid]) end
-	end
+
+-- å¯åŠ¨GSMåè®®æ ˆã€‚ä¾‹å¦‚åœ¨å……ç”µå¼€æœºæœªå¯åŠ¨GSMåè®®æ ˆçŠ¶æ€ä¸‹ï¼Œå¦‚æœç”¨æˆ·é•¿æŒ‰é”®æ­£å¸¸å¼€æœºï¼Œæ­¤æ—¶è°ƒç”¨æ­¤æ¥å£å¯åŠ¨GSMåè®®æ ˆå³å¯
+-- @return æ— 
+-- @usage sys.powerOn()
+function powerOn()
+    rtos.poweron(1)
 end
 
---[[
-º¯ÊıÃû£ºcomp_table
-¹¦ÄÜ  £º±È½ÏÁ½¸ötableµÄÄÚÈİÊÇ·ñÏàÍ¬£¬×¢Òâ£ºtableÖĞ²»ÄÜÔÙ°üº¬table
-²ÎÊı  £º
-		t1£ºµÚÒ»¸ötable
-		t2£ºµÚ¶ş¸ötable
-·µ»ØÖµ£ºÏàÍ¬·µ»Øtrue£¬·ñÔòfalse
-]]
-local function comp_table(t1,t2)
-	if not t2 then return #t1 == 0 end
-	if #t1 == #t2 then
-		for i=1,#t1 do
-			if unpack(t1,i,i) ~= unpack(t2,i,i) then
-				return false
-			end
-		end
-		return true
-	end
-	return false
-end
-
---[[
-º¯ÊıÃû£ºtimer_start
-¹¦ÄÜ  £º¿ªÆôÒ»¸ö¶¨Ê±Æ÷
-²ÎÊı  £º
-		fnc£º¶¨Ê±Æ÷µÄ»Øµ÷º¯Êı
-		ms£º¶¨Ê±Æ÷Ê±³¤£¬µ¥Î»ÎªºÁÃë
-		...£º×Ô¶¨Òå¿É±ä²ÎÊı£¬µ÷ÓÃ»Øµ÷º¯ÊıÊ±£¬»á°Ñ×Ô¶¨ÒåµÄ¿É±ä²ÎÊı»Ø´«¸øÓÃ»§
-		×¢Òâ£ºfncºÍ¿É±ä²ÎÊı...¹²Í¬±ê¼ÇÎ¨Ò»µÄÒ»¸ö¶¨Ê±Æ÷
-·µ»ØÖµ£º¶¨Ê±Æ÷µÄID£¬Èç¹ûÊ§°Ü·µ»Ønil
-]]
-function timer_start(fnc,ms,...)
-	--»Øµ÷º¯ÊıºÍÊ±³¤±ØĞëÓĞĞ§£¬·ñÔòËÀ»úÖØÆô
-	assert(fnc~=nil,"timer_start:callback function==nil")
-	assert(ms>0,"timer_start:ms==0")
-	--¹Ø±ÕÍêÈ«ÏàÍ¬µÄ¶¨Ê±Æ÷
-	if arg.n == 0 then
-		timer_stop(fnc)
-	else
-		timer_stop(fnc,unpack(arg))
-	end
-	--Èç¹ûÊ±³¤³¬¹ıµ¥²½Ö§³ÖµÄ×î´óÊ±³¤£¬Ôò²ğ·ÖÎª¼¸¸ö¶¨Ê±Æ÷
-	if ms > MAXMS then
-		local count = (ms-(ms%MAXMS))/MAXMS + (ms%MAXMS == 0 and 0 or 1)
-		local step = (ms-(ms%count))/count
-		tval = {cb = fnc, step = step, total = count, times = 0}
-		ms = step
-	--Ê±³¤Î´³¬¹ıµ¥²½Ö§³ÖµÄ×î´óÊ±³¤
-	else
-		tval = fnc
-	end
-	--´Ó¶¨Ê±Æ÷id±íÖĞÕÒµ½Ò»¸öÎ´Ê¹ÓÃµÄidÊ¹ÓÃ
-	while true do
-		uniquetid = uniquetid + 1
-		if tpool[uniquetid] == nil then
-			tpool[uniquetid] = tval
-			break
-		end
-	end
-	--µ÷ÓÃµ×²ã½Ó¿ÚÆô¶¯¶¨Ê±Æ÷
-	if rtos.timer_start(uniquetid,ms) ~= 1 then print("rtos.timer_start error") return end
-	--Èç¹û´æÔÚ¿É±ä²ÎÊı£¬ÔÚ¶¨Ê±Æ÷²ÎÊı±íÖĞ±£´æ²ÎÊı
-	if arg.n ~= 0 then
-		para[uniquetid] = arg
-	end
-	--·µ»Ø¶¨Ê±Æ÷id
-	return uniquetid
-end
-
---[[
-º¯ÊıÃû£ºtimer_loop_start
-¹¦ÄÜ  £º¿ªÆôÒ»¸öÑ­»·¶¨Ê±Æ÷
-²ÎÊı  £º
-		fnc£º¶¨Ê±Æ÷µÄ»Øµ÷º¯Êı
-		ms£º¶¨Ê±Æ÷Ê±³¤£¬µ¥Î»ÎªºÁÃë
-		...£º×Ô¶¨Òå¿É±ä²ÎÊı£¬µ÷ÓÃ»Øµ÷º¯ÊıÊ±£¬»á°Ñ×Ô¶¨ÒåµÄ¿É±ä²ÎÊı»Ø´«¸øÓÃ»§
-		×¢Òâ£ºfncºÍ¿É±ä²ÎÊı...¹²Í¬±ê¼ÇÎ¨Ò»µÄÒ»¸ö¶¨Ê±Æ÷
-·µ»ØÖµ£º¶¨Ê±Æ÷µÄID£¬Èç¹ûÊ§°Ü·µ»Ønil
-]]
-function timer_loop_start(fnc,ms,...)
-	local tid = timer_start(fnc,ms,unpack(arg))
-	if tid then loop[tid] = ms end
-	return tid
-end
-
---[[
-º¯ÊıÃû£ºtimer_stop
-¹¦ÄÜ  £º¹Ø±ÕÒ»¸ö¶¨Ê±Æ÷
-²ÎÊı  £º
-		val£ºÓĞÁ½ÖÖĞÎÊ½£º
-		     Ò»ÖÖÊÇ¿ªÆô¶¨Ê±Æ÷Ê±·µ»ØµÄ¶¨Ê±Æ÷id£¬´ËĞÎÊ½Ê±²»ĞèÒªÔÙ´«Èë¿É±ä²ÎÊı...¾ÍÄÜÎ¨Ò»±ê¼ÇÒ»¸ö¶¨Ê±Æ÷
-			 ÁíÒ»ÖÖÊÇ¿ªÆô¶¨Ê±Æ÷Ê±µÄ»Øµ÷º¯Êı£¬´ËĞÎÊ½Ê±±ØĞëÔÙ´«Èë¿É±ä²ÎÊı...²ÅÄÜÎ¨Ò»±ê¼ÇÒ»¸ö¶¨Ê±Æ÷
-		...£º×Ô¶¨Òå¿É±ä²ÎÊı£¬Óëtimer_startºÍtimer_loop_startÖĞµÄ¿É±ä²ÎÊıÒâÒåÏàÍ¬
-·µ»ØÖµ£ºÎŞ
-]]
-function timer_stop(val,...)
-	--valÎª¶¨Ê±Æ÷id
-	if type(val) == "number" then
-		tpool[val],para[val],loop[val] = nil
-		rtos.timer_stop(val)
-	else
-		for k,v in pairs(tpool) do
-			--»Øµ÷º¯ÊıÏàÍ¬
-			if type(v) == "table" and v.cb == val or v == val then
-				--×Ô¶¨Òå¿É±ä²ÎÊıÏàÍ¬
-				if comp_table(arg,para[k])then
-					rtos.timer_stop(k)
-					tpool[k],para[k],loop[k] = nil
-					break
-				end
-			end
-		end
-	end
-end
-
---[[
-º¯ÊıÃû£ºtimer_stop_all
-¹¦ÄÜ  £º¹Ø±ÕÄ³¸ö»Øµ÷º¯Êı±ê¼ÇµÄËùÓĞ¶¨Ê±Æ÷£¬ÎŞÂÛ¿ªÆô¶¨Ê±Æ÷Ê±ÓĞÃ»ÓĞ´«Èë×Ô¶¨Òå¿É±ä²ÎÊı
-²ÎÊı  £º
-		fnc£º¿ªÆô¶¨Ê±Æ÷Ê±µÄ»Øµ÷º¯Êı
-·µ»ØÖµ£ºÎŞ
-]]
-function timer_stop_all(fnc)
-	for k,v in pairs(tpool) do
-		if type(v) == "table" and v.cb == fnc or v == fnc then
-			rtos.timer_stop(k)
-			tpool[k],para[k],loop[k] = nil
-		end
-	end
-end
-
---[[
-º¯ÊıÃû£ºtimer_is_active
-¹¦ÄÜ  £ºÅĞ¶ÏÄ³¸ö¶¨Ê±Æ÷ÊÇ·ñ´¦ÓÚ¿ªÆô×´Ì¬
-²ÎÊı  £º
-		val£ºÓĞÁ½ÖÖĞÎÊ½£º
-		     Ò»ÖÖÊÇ¿ªÆô¶¨Ê±Æ÷Ê±·µ»ØµÄ¶¨Ê±Æ÷id£¬´ËĞÎÊ½Ê±²»ĞèÒªÔÙ´«Èë¿É±ä²ÎÊı...¾ÍÄÜÎ¨Ò»±ê¼ÇÒ»¸ö¶¨Ê±Æ÷
-			 ÁíÒ»ÖÖÊÇ¿ªÆô¶¨Ê±Æ÷Ê±µÄ»Øµ÷º¯Êı£¬´ËĞÎÊ½Ê±±ØĞëÔÙ´«Èë¿É±ä²ÎÊı...²ÅÄÜÎ¨Ò»±ê¼ÇÒ»¸ö¶¨Ê±Æ÷
-		...£º×Ô¶¨Òå¿É±ä²ÎÊı£¬Óëtimer_startºÍtimer_loop_startÖĞµÄ¿É±ä²ÎÊıÒâÒåÏàÍ¬
-·µ»ØÖµ£º¿ªÆô·µ»Øtrue£¬·ñÔòfalse
-]]
-function timer_is_active(val,...)
-	if type(val) == "number" then
-		return tpool[val] ~= nil
-	else
-		for k,v in pairs(tpool) do
-			if type(v) == "table" and v.cb == val or v == val then
-				if comp_table(arg,para[k]) then
-					return true
-				end
-			end
-		end
-		return false
-	end
-end
-
---[[
-º¯ÊıÃû£ºreadtxt
-¹¦ÄÜ  £º¶ÁÈ¡ÎÄ±¾ÎÄ¼şÖĞµÄÈ«²¿ÄÚÈİ
-²ÎÊı  £º
-		f£ºÎÄ¼şÂ·¾¶
-·µ»ØÖµ£ºÎÄ±¾ÎÄ¼şÖĞµÄÈ«²¿ÄÚÈİ£¬¶ÁÈ¡Ê§°ÜÎª¿Õ×Ö·û´®»òÕßnil
-]]
-local function readtxt(f)
-	local file,rt = io.open(f,"r")
-	if not file then print("sys.readtxt no open",f) return "" end
-	rt = file:read("*a")
-	file:close()
-	return rt
-end
-
---[[
-º¯ÊıÃû£ºwritetxt
-¹¦ÄÜ  £ºĞ´ÎÄ±¾ÎÄ¼ş
-²ÎÊı  £º
-		f£ºÎÄ¼şÂ·¾¶
-		v£ºÒªĞ´ÈëµÄÎÄ±¾ÄÚÈİ
-·µ»ØÖµ£ºÎŞ
-]]
-local function writetxt(f,v)
-	local file = io.open(f,"w")
-	if not file then print("sys.writetxt no open",f) return end	
-	file:write(v)
-	file:close()
-end
-
---[[
-º¯ÊıÃû£ºappenderr
-¹¦ÄÜ  £º×·¼Ó´íÎóĞÅÏ¢µ½LIB_ERR_FILEÎÄ¼şÖĞ
-²ÎÊı  £º
-		s£º´íÎóĞÅÏ¢£¬ÓÃ»§×Ô¶¨Òå£¬Ò»°ãÊÇstringÀàĞÍ£¬ÖØÆôºóµÄtraceÖĞ»á´òÓ¡³ö´Ë´íÎóĞÅÏ¢
-·µ»ØÖµ£ºÎŞ
-]]
-local function appenderr(s)
-	print("appenderr",string.len(liberr),s)
-	if string.len(liberr)<2048 then
-		liberr = liberr..s
-		writetxt(LIB_ERR_FILE,liberr)
-	end	
-end
-
---[[
-º¯ÊıÃû£ºiniterr
-¹¦ÄÜ  £º´òÓ¡LIB_ERR_FILEÎÄ¼şÖĞµÄ´íÎóĞÅÏ¢
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-local function initerr()
-	extliberr = readtxt(LIB_ERR_FILE) or ""
-	print("sys.initerr",extliberr)
-	--É¾³ıLIB_ERR_FILEÎÄ¼ş
-	os.remove(LIB_ERR_FILE)
-end
-
---[[
-º¯ÊıÃû£ºgetextliberr
-¹¦ÄÜ  £º»ñÈ¡LIB_ERR_FILEÎÄ¼şÖĞµÄ´íÎóĞÅÏ¢£¬¸øÍâ²¿Ä£¿éÊ¹ÓÃ
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºLIB_ERR_FILEÎÄ¼şÖĞµÄ´íÎóĞÅÏ¢
-]]
-function getextliberr()
-	return extliberr or (readtxt(LIB_ERR_FILE) or "")
-end
-
---[[
-º¯ÊıÃû£ºluaerrexit
-¹¦ÄÜ  £º¹ÊÒâ²úÉúÒ»¸öÓï·¨´íÎó£¬Ê¹coreÖĞµÄLuaĞéÄâ»úÖØÆô£¬Èç¹ûµ±Ç°ÔËĞĞµÄ½Å±¾ÊÇÔ¶³ÌÉı¼¶µÄ½Å±¾£¬»á×Ô¶¯É¾³ıµ±Ç°ÔËĞĞ½Å±¾£¬»ØÍËµ½Ô­Ê¼ÉÕĞ´µÄ½Å±¾
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-ËµÃ÷  £ºÈç¹ûÊÇ´Ë½Ó¿Úµ¼ÖÂµÄÖØÆô£¬ÊÇÒòÎª³ÌĞòÖĞ´ò¿ªÁËupdate¡¢dbg»òÕßaliyuniotota¹¦ÄÜ£¬µ«ÊÇÔÚupdate¡¢dbg»òÕßaliyuniotota¹¦ÄÜ»¹Ã»ÓĞÖ´ĞĞ½áÊøÊ±£¬ÆäËû¹¦ÄÜ½Å±¾·¢ÉúÁËÓï·¨´íÎó£¬´ËÊ±»á°ÑÓï·¨´íÎó»º´æÆğÀ´£¬²¢²»Á¢¼´ÖØÆô
-		µÈupdate¡¢dbgºÍaliyuniotota¹¦ÄÜ½áÊøºó£¬ÔÙÍ¨¹ıµ÷ÓÃÒ»¸ö·Ç·¨µÄluaerrexitfnc½Ó¿Ú²úÉúÓï·¨´íÎó£¬´¥·¢Óï·¨´íÎóÀàĞÍµÄÖØÆô
-		ÖÁÓÚÕæÕıµ¼ÖÂÖØÆôµÄÓï·¨´íÎó£¬ÔÚtraceÖĞËÑË÷saferestartÈ¥·ÖÎö
-]]
-local function luaerrexit()
-	if sRestoreFlag then
-		luaerrexitfnc()
-	else
-		rtos.restart()
-	end
-end
-local function saferestart(r)
-	print("saferestart",r,restartflg,rtos.remove_dir)
-	appenderr(r or "")
-	if restartflg==0 then
-		if luarunerr==1 then
-			luarunerr = 2
-			regapp(luaerrexit,"LUA_ERR_EXIT")
-			dispatch("LUA_ERR_EXIT")
-		else
-			rtos.restart()
-		end
-	else		
-		restartpending = true
-	end
-end
-
-
---[[
-º¯ÊıÃû£ºrestart
-¹¦ÄÜ  £ºÈí¼şÖØÆô
-²ÎÊı  £º
-		r£ºÖØÆôÔ­Òò£¬ÓÃ»§×Ô¶¨Òå£¬Ò»°ãÊÇstringÀàĞÍ£¬ÖØÆôºóµÄtraceÖĞ»á´òÓ¡³ö´ËÖØÆôÔ­Òò
-·µ»ØÖµ£ºÎŞ
-]]
+--- è½¯ä»¶é‡å¯
+-- @string r é‡å¯åŸå› ï¼Œç”¨æˆ·è‡ªå®šä¹‰ï¼Œä¸€èˆ¬æ˜¯stringç±»å‹ï¼Œé‡å¯åçš„traceä¸­ä¼šæ‰“å°å‡ºæ­¤é‡å¯åŸå› 
+-- @return æ— 
+-- @usage sys.restart('ç¨‹åºè¶…æ—¶è½¯ä»¶é‡å¯')
 function restart(r)
-	assert(r and r ~= "","sys.restart cause null")
-	saferestart("restart["..r.."];")
+    assert(r and r ~= "", "sys.restart cause null")
+    if errDump and errDump.appendErr and type(errDump.appendErr) == "function" then errDump.appendErr("restart[" .. r .. "];") end
+    rtos.restart()
 end
 
+--- Taskä»»åŠ¡å»¶æ—¶å‡½æ•°ï¼Œåªèƒ½ç”¨äºä»»åŠ¡å‡½æ•°ä¸­
+-- @number ms  æ•´æ•°ï¼Œæœ€å¤§ç­‰å¾…126322567æ¯«ç§’
+-- @return å®šæ—¶ç»“æŸè¿”å›nil,è¢«å…¶ä»–çº¿ç¨‹å”¤èµ·è¿”å›è°ƒç”¨çº¿ç¨‹ä¼ å…¥çš„å‚æ•°
+-- @usage sys.wait(30)
+function wait(ms)
+    -- å‚æ•°æ£€æµ‹ï¼Œå‚æ•°ä¸èƒ½ä¸ºè´Ÿå€¼
+    assert(ms > 0, "The wait time cannot be negative!")
+    -- é€‰ä¸€ä¸ªæœªä½¿ç”¨çš„å®šæ—¶å™¨IDç»™è¯¥ä»»åŠ¡çº¿ç¨‹
+    if taskTimerId >= TASK_TIMER_ID_MAX then taskTimerId = 0 end
+    taskTimerId = taskTimerId + 1
+    local timerid = taskTimerId
+    taskTimerPool[coroutine.running()] = timerid
+    timerPool[timerid] = coroutine.running()
+    -- è°ƒç”¨coreçš„rtoså®šæ—¶å™¨
+    if 1 ~= rtos.timer_start(timerid, ms) then log.debug("rtos.timer_start error") return end
+    -- æŒ‚èµ·è°ƒç”¨çš„ä»»åŠ¡çº¿ç¨‹
+    local message = {coroutine.yield()}
+    if #message ~= 0 then
+        rtos.timer_stop(timerid)
+        taskTimerPool[coroutine.running()] = nil
+        timerPool[timerid] = nil
+        return unpack(message)
+    end
+end
+
+--- Taskä»»åŠ¡çš„æ¡ä»¶ç­‰å¾…å‡½æ•°ï¼ˆåŒ…æ‹¬äº‹ä»¶æ¶ˆæ¯å’Œå®šæ—¶å™¨æ¶ˆæ¯ç­‰æ¡ä»¶ï¼‰ï¼Œåªèƒ½ç”¨äºä»»åŠ¡å‡½æ•°ä¸­ã€‚
+-- @param id æ¶ˆæ¯ID
+-- @number ms ç­‰å¾…è¶…æ—¶æ—¶é—´ï¼Œå•ä½msï¼Œæœ€å¤§ç­‰å¾…126322567æ¯«ç§’
+-- @return result æ¥æ”¶åˆ°æ¶ˆæ¯è¿”å›trueï¼Œè¶…æ—¶è¿”å›false
+-- @return data æ¥æ”¶åˆ°æ¶ˆæ¯è¿”å›æ¶ˆæ¯å‚æ•°
+-- @usage result, data = sys.waitUntil("SIM_IND", 120000)
+function waitUntil(id, ms)
+    subscribe(id, coroutine.running())
+    local message = ms and {wait(ms)} or {coroutine.yield()}
+    unsubscribe(id, coroutine.running())
+    return message[1] ~= nil, unpack(message, 2, #message)
+end
+
+--- Taskä»»åŠ¡çš„æ¡ä»¶ç­‰å¾…å‡½æ•°æ‰©å±•ï¼ˆåŒ…æ‹¬äº‹ä»¶æ¶ˆæ¯å’Œå®šæ—¶å™¨æ¶ˆæ¯ç­‰æ¡ä»¶ï¼‰ï¼Œåªèƒ½ç”¨äºä»»åŠ¡å‡½æ•°ä¸­ã€‚
+-- @param id æ¶ˆæ¯ID
+-- @number ms ç­‰å¾…è¶…æ—¶æ—¶é—´ï¼Œå•ä½msï¼Œæœ€å¤§ç­‰å¾…126322567æ¯«ç§’
+-- @return message æ¥æ”¶åˆ°æ¶ˆæ¯è¿”å›messageï¼Œè¶…æ—¶è¿”å›false
+-- @return data æ¥æ”¶åˆ°æ¶ˆæ¯è¿”å›æ¶ˆæ¯å‚æ•°
+-- @usage result, data = sys.waitUntilExt("SIM_IND", 120000)
+function waitUntilExt(id, ms)
+    subscribe(id, coroutine.running())
+    local message = ms and {wait(ms)} or {coroutine.yield()}
+    unsubscribe(id, coroutine.running())
+    if message[1] ~= nil then return unpack(message) end
+    return false
+end
+
+--- åˆ›å»ºä¸€ä¸ªä»»åŠ¡çº¿ç¨‹,åœ¨æ¨¡å—æœ€æœ«è¡Œè°ƒç”¨è¯¥å‡½æ•°å¹¶æ³¨å†Œæ¨¡å—ä¸­çš„ä»»åŠ¡å‡½æ•°ï¼Œmain.luaå¯¼å…¥è¯¥æ¨¡å—å³å¯
+-- @param fun ä»»åŠ¡å‡½æ•°åï¼Œç”¨äºresumeå”¤é†’æ—¶è°ƒç”¨
+-- @param ... ä»»åŠ¡å‡½æ•°funçš„å¯å˜å‚æ•°
+-- @return co  è¿”å›è¯¥ä»»åŠ¡çš„çº¿ç¨‹å·
+-- @usage sys.taskInit(task1,'a','b')
+function taskInit(fun, ...)
+    local co = coroutine.create(fun)
+    coroutine.resume(co, unpack(arg))
+    return co
+end
+
+--- Luatå¹³å°åˆå§‹åŒ–
+-- @param mode å……ç”µå¼€æœºæ˜¯å¦å¯åŠ¨GSMåè®®æ ˆï¼Œ1ä¸å¯åŠ¨ï¼Œå¦åˆ™å¯åŠ¨
+-- @param lprfnc ç”¨æˆ·åº”ç”¨è„šæœ¬ä¸­å®šä¹‰çš„â€œä½ç”µå…³æœºå¤„ç†å‡½æ•°â€ï¼Œå¦‚æœæœ‰å‡½æ•°åï¼Œåˆ™ä½ç”µæ—¶ï¼Œæœ¬æ–‡ä»¶ä¸­çš„runæ¥å£ä¸ä¼šæ‰§è¡Œä»»ä½•åŠ¨ä½œï¼Œå¦åˆ™ï¼Œä¼šå»¶æ—¶1åˆ†é’Ÿè‡ªåŠ¨å…³æœº
+-- @return æ— 
+-- @usage sys.init(1,0)
+function init(mode, lprfnc)
+    -- ç”¨æˆ·åº”ç”¨è„šæœ¬ä¸­å¿…é¡»å®šä¹‰PROJECTå’ŒVERSIONä¸¤ä¸ªå…¨å±€å˜é‡ï¼Œå¦åˆ™ä¼šæ­»æœºé‡å¯ï¼Œå¦‚ä½•å®šä¹‰è¯·å‚è€ƒå„ä¸ªdemoä¸­çš„main.lua
+    assert(PROJECT and PROJECT ~= "" and VERSION and VERSION ~= "", "Undefine PROJECT or VERSION")
+    collectgarbage("setpause", 80)
+    
+    -- è®¾ç½®ATå‘½ä»¤çš„è™šæ‹Ÿä¸²å£
+    uart.setup(uart.ATC, 0, 0, uart.PAR_NONE, uart.STOP_1)
+    log.info("poweron reason:", rtos.poweron_reason(), PROJECT, VERSION, SCRIPT_LIB_VER, rtos.get_version())
+    if mode == 1 then
+        -- å……ç”µå¼€æœº
+        if rtos.poweron_reason() == rtos.POWERON_CHARGER then
+            -- å…³é—­GSMåè®®æ ˆ
+            rtos.poweron(0)
+        end
+    end
+end
+
+------------------------------------------ rtosæ¶ˆæ¯å›è°ƒå¤„ç†éƒ¨åˆ† ------------------------------------------
 --[[
-º¯ÊıÃû£ºgetcorever
-¹¦ÄÜ  £º»ñÈ¡µ×²ãÈí¼ş°æ±¾ºÅ
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£º°æ±¾ºÅ×Ö·û´®
+å‡½æ•°åï¼šcmpTable
+åŠŸèƒ½  ï¼šæ¯”è¾ƒä¸¤ä¸ªtableçš„å†…å®¹æ˜¯å¦ç›¸åŒï¼Œæ³¨æ„ï¼štableä¸­ä¸èƒ½å†åŒ…å«table
+å‚æ•°  ï¼š
+t1ï¼šç¬¬ä¸€ä¸ªtable
+t2ï¼šç¬¬äºŒä¸ªtable
+è¿”å›å€¼ï¼šç›¸åŒè¿”å›trueï¼Œå¦åˆ™false
 ]]
-function getcorever()
-	return rtos.get_version()
+local function cmpTable(t1, t2)
+    if not t2 then return #t1 == 0 end
+    if #t1 == #t2 then
+        for i = 1, #t1 do
+            if unpack(t1, i, i) ~= unpack(t2, i, i) then
+                return false
+            end
+        end
+        return true
+    end
+    return false
 end
 
---[[
-º¯ÊıÃû£ºinit
-¹¦ÄÜ  £ºluaÓ¦ÓÃ³ÌĞò³õÊ¼»¯
-²ÎÊı  £º
-		mode£º³äµç¿ª»úÊÇ·ñÆô¶¯GSMĞ­ÒéÕ»£¬1²»Æô¶¯£¬·ñÔòÆô¶¯
-		lprfnc£ºÓÃ»§Ó¦ÓÃ½Å±¾ÖĞ¶¨ÒåµÄ¡°µÍµç¹Ø»ú´¦Àíº¯Êı¡±£¬Èç¹ûÓĞº¯ÊıÃû£¬ÔòµÍµçÊ±£¬±¾ÎÄ¼şÖĞµÄrun½Ó¿Ú²»»áÖ´ĞĞÈÎºÎ¶¯×÷£¬·ñÔò£¬»áÑÓÊ±1·ÖÖÓ×Ô¶¯¹Ø»ú
-·µ»ØÖµ£ºÎŞ
-]]
-function init(mode,lprfnc)
-	--ÓÃ»§Ó¦ÓÃ½Å±¾main.luaÖĞ±ØĞë¶¨ÒåMODULE_TYPE¡¢PROJECTºÍVERSIONÈı¸öÈ«¾Ö±äÁ¿£¬·ñÔò»áËÀ»úÖØÆô£¬ÈçºÎ¶¨ÒåÇë²Î¿¼¸÷¸ödemoÖĞµÄmain.lua
-	assert(base.MODULE_TYPE and base.MODULE_TYPE ~= "" and base.PROJECT and base.PROJECT ~= "" and base.VERSION and base.VERSION ~= "","Undefine MODULE_TYPE¡¢PROJECT or VERSION")
-	base.collectgarbage("setpause",80)
-	require"net"
-	--ÉèÖÃATÃüÁîµÄĞéÄâ´®¿Ú
-	uart.setup(uart.ATC,0,0,uart.PAR_NONE,uart.STOP_1)
-	print("poweron reason:",rtos.poweron_reason(),base.MODULE_TYPE,base.PROJECT,base.VERSION,SCRIPT_LIB_VER,getcorever())
-	if mode == 1 then
-		--³äµç¿ª»ú
-		if rtos.poweron_reason() == rtos.POWERON_CHARGER then
-			--¹Ø±ÕGSMĞ­ÒéÕ»
-			rtos.poweron(0)
-		end
-	end
-	--Èç¹û´æÔÚ½Å±¾ÔËĞĞ´íÎóÎÄ¼ş£¬´ò¿ªÎÄ¼ş£¬´òÓ¡´íÎóĞÅÏ¢
-	local f = io.open("/luaerrinfo.txt","r")
-	if f then
-		print(f:read("*a") or "")
-		f:close()
-	end
-	--±£´æ ÓÃ»§Ó¦ÓÃ½Å±¾ÖĞ¶¨ÒåµÄ¡°µÍµç¹Ø»ú´¦Àíº¯Êı¡±
-	lprfun = lprfnc
-	initerr()
+--- å…³é—­å®šæ—¶å™¨
+-- @param val å€¼ä¸ºnumberæ—¶ï¼Œè¯†åˆ«ä¸ºå®šæ—¶å™¨IDï¼Œå€¼ä¸ºå›è°ƒå‡½æ•°æ—¶ï¼Œéœ€è¦ä¼ å‚æ•°
+-- @param ... valå€¼ä¸ºå‡½æ•°æ—¶ï¼Œå‡½æ•°çš„å¯å˜å‚æ•°
+-- @return æ— 
+-- @usage timerStop(1)
+function timerStop(val, ...)
+    -- val ä¸ºå®šæ—¶å™¨ID
+    if type(val) == 'number' then
+        timerPool[val], para[val], loop[val] = nil
+        rtos.timer_stop(val)
+    else
+        for k, v in pairs(timerPool) do
+            -- å›è°ƒå‡½æ•°ç›¸åŒ
+            if type(v) == 'table' and v.cb == val or v == val then
+                -- å¯å˜å‚æ•°ç›¸åŒ
+                if cmpTable(arg, para[k]) then
+                    rtos.timer_stop(k)
+                    timerPool[k], para[k], loop[val] = nil
+                    break
+                end
+            end
+        end
+    end
 end
 
---[[
-º¯ÊıÃû£ºpoweron
-¹¦ÄÜ  £ºÆô¶¯GSMĞ­ÒéÕ»¡£ÀıÈçÔÚ³äµç¿ª»úÎ´Æô¶¯GSMĞ­ÒéÕ»×´Ì¬ÏÂ£¬Èç¹ûÓÃ»§³¤°´¼üÕı³£¿ª»ú£¬´ËÊ±µ÷ÓÃ´Ë½Ó¿ÚÆô¶¯GSMĞ­ÒéÕ»¼´¿É
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-function poweron()
-	rtos.poweron(1)
+--- å…³é—­åŒä¸€å›è°ƒå‡½æ•°çš„æ‰€æœ‰å®šæ—¶å™¨
+-- @param fnc å®šæ—¶å™¨å›è°ƒå‡½æ•°
+-- @return æ— 
+-- @usage timerStopAll(cbFnc)
+function timerStopAll(fnc)
+    for k, v in pairs(timerPool) do
+        if type(v) == "table" and v.cb == fnc or v == fnc then
+            rtos.timer_stop(k)
+            timerPool[k], para[k], loop[k] = nil
+        end
+    end
 end
 
---[[
-º¯ÊıÃû£ºsetworkmode
-¹¦ÄÜ  £ºÉèÖÃ¹¤×÷Ä£Ê½
-²ÎÊı  £º
-		v£º¹¤×÷Ä£Ê½
-·µ»ØÖµ£º³É¹¦·µ»Øtrue£¬·ñÔò·µ»Ønil
-]]
-function setworkmode(v)
-	if workmode~=v and (v==SIMPLE_MODE or v==FULL_MODE) then
-		workmode = v
-		--²úÉúÒ»¸ö¹¤×÷Ä£Ê½±ä»¯µÄÄÚ²¿ÏûÏ¢"SYS_WORKMODE_IND"
-		dispatch("SYS_WORKMODE_IND")
-		return true
-	end
+--- å¼€å¯ä¸€ä¸ªå®šæ—¶å™¨
+-- @param fnc å®šæ—¶å™¨å›è°ƒå‡½æ•°
+-- @number ms æ•´æ•°ï¼Œæœ€å¤§å®šæ—¶126322567æ¯«ç§’
+-- @param ... å¯å˜å‚æ•° fncçš„å‚æ•°
+-- @return number å®šæ—¶å™¨IDï¼Œå¦‚æœå¤±è´¥ï¼Œè¿”å›nil
+function timerStart(fnc, ms, ...)
+    --å›è°ƒå‡½æ•°å’Œæ—¶é•¿æ£€æµ‹
+    assert(fnc ~= nil, "sys.timerStart(first param) is nil !")
+    assert(ms > 0, "sys.timerStart(Second parameter) is <= zero !")
+    -- å…³é—­å®Œå…¨ç›¸åŒçš„å®šæ—¶å™¨
+    if arg.n == 0 then
+        timerStop(fnc)
+    else
+        timerStop(fnc, unpack(arg))
+    end
+    -- ä¸ºå®šæ—¶å™¨ç”³è¯·IDï¼ŒIDå€¼ 1-20 ç•™ç»™ä»»åŠ¡ï¼Œ20-30ç•™ç»™æ¶ˆæ¯ä¸“ç”¨å®šæ—¶å™¨
+    while true do
+        if msgId >= MSG_TIMER_ID_MAX then msgId = TASK_TIMER_ID_MAX end
+        msgId = msgId + 1
+        if timerPool[msgId] == nil then
+            timerPool[msgId] = fnc
+            break
+        end
+    end
+    --è°ƒç”¨åº•å±‚æ¥å£å¯åŠ¨å®šæ—¶å™¨
+    if rtos.timer_start(msgId, ms) ~= 1 then log.debug("rtos.timer_start error") return end
+    --å¦‚æœå­˜åœ¨å¯å˜å‚æ•°ï¼Œåœ¨å®šæ—¶å™¨å‚æ•°è¡¨ä¸­ä¿å­˜å‚æ•°
+    if arg.n ~= 0 then
+        para[msgId] = arg
+    end
+    --è¿”å›å®šæ—¶å™¨id
+    return msgId
 end
 
---[[
-º¯ÊıÃû£ºgetworkmode
-¹¦ÄÜ  £º»ñÈ¡¹¤×÷Ä£Ê½
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºµ±Ç°¹¤×÷Ä£Ê½
-]]
-function getworkmode()
-	return workmode
+--- å¼€å¯ä¸€ä¸ªå¾ªç¯å®šæ—¶å™¨
+-- @param fnc å®šæ—¶å™¨å›è°ƒå‡½æ•°
+-- @number ms æ•´æ•°ï¼Œæœ€å¤§å®šæ—¶126322567æ¯«ç§’
+-- @param ... å¯å˜å‚æ•° fncçš„å‚æ•°
+-- @return number å®šæ—¶å™¨IDï¼Œå¦‚æœå¤±è´¥ï¼Œè¿”å›nil
+function timerLoopStart(fnc, ms, ...)
+    local tid = timerStart(fnc, ms, unpack(arg))
+    if tid then loop[tid] = ms end
+    return tid
 end
 
---[[
-º¯ÊıÃû£ºopntrace
-¹¦ÄÜ  £º¿ªÆô»òÕß¹Ø±ÕprintµÄ´òÓ¡Êä³ö¹¦ÄÜ
-²ÎÊı  £º
-		v£ºfalse»ònilÎª¹Ø±Õ£¬ÆäÓàÎª¿ªÆô
-		uartid£ºÊä³öLuatraceµÄ¶Ë¿Ú£ºnil±íÊ¾host¿Ú£¬1±íÊ¾uart1,2±íÊ¾uart2
-		baudrate£ºnumberÀàĞÍ£¬uartid²»ÎªnilÊ±£¬´Ë²ÎÊı²ÅÓĞÒâÒå£¬±íÊ¾²¨ÌØÂÊ£¬Ä¬ÈÏ115200
-				  ½öÖ§³Ö1200,2400,4800,9600,14400,19200,28800,38400,57600,76800,115200,230400,460800,576000,921600,1152000,4000000
-·µ»ØÖµ£ºÎŞ
-]]
-function opntrace(v,uartid,baudrate)
-	if uartid then
-		if v then
-			uart.setup(uartid,baudrate or 115200,8,uart.PAR_NONE,uart.STOP_1)
-		else
-			uart.close(uartid)
-		end
-	end
-	rtos.set_trace(v and 1 or 0,uartid)
-end
-
---app´æ´¢±í
-local apps = {}
-
---[[
-º¯ÊıÃû£ºregapp
-¹¦ÄÜ  £º×¢²áapp
-²ÎÊı  £º¿É±ä²ÎÊı£¬appµÄ²ÎÊı£¬ÓĞÒÔÏÂÁ½ÖÖĞÎÊ½£º
-		ÒÔº¯Êı·½Ê½×¢²áµÄapp£¬ÀıÈçregapp(fncname,"MSG1","MSG2","MSG3")
-		ÒÔtable·½Ê½×¢²áµÄapp£¬ÀıÈçregapp({MSG1=fnc1,MSG2=fnc2,MSG3=fnc3})
-·µ»ØÖµ£ºÎŞ
-]]
-function regapp(...)
-	local app = arg[1]
-	--table·½Ê½
-	if type(app) == "table" then
-	--º¯Êı·½Ê½
-	elseif type(app) == "function" then
-		app = {procer = arg[1],unpack(arg,2,arg.n)}
-	else
-		error("unknown app type "..type(app),2)
-	end
-	--²úÉúÒ»¸öÔö¼ÓappµÄÄÚ²¿ÏûÏ¢
-	dispatch("SYS_ADD_APP",app)
-	return app
-end
-
---[[
-º¯ÊıÃû£ºderegapp
-¹¦ÄÜ  £º½â×¢²áapp
-²ÎÊı  £º
-		id£ºappµÄid£¬id¹²ÓĞÁ½ÖÖ·½Ê½£¬Ò»ÖÖÊÇº¯ÊıÃû£¬ÁíÒ»ÖÖÊÇtableÃû
-·µ»ØÖµ£ºÎŞ
-]]
-function deregapp(id)
-	--²úÉúÒ»¸öÒÆ³ıappµÄÄÚ²¿ÏûÏ¢
-	dispatch("SYS_REMOVE_APP",id)
+--- åˆ¤æ–­æŸä¸ªå®šæ—¶å™¨æ˜¯å¦å¤„äºå¼€å¯çŠ¶æ€
+-- @param val æœ‰ä¸¤ç§å½¢å¼
+--ä¸€ç§æ˜¯å¼€å¯å®šæ—¶å™¨æ—¶è¿”å›çš„å®šæ—¶å™¨idï¼Œæ­¤å½¢å¼æ—¶ä¸éœ€è¦å†ä¼ å…¥å¯å˜å‚æ•°...å°±èƒ½å”¯ä¸€æ ‡è®°ä¸€ä¸ªå®šæ—¶å™¨
+--å¦ä¸€ç§æ˜¯å¼€å¯å®šæ—¶å™¨æ—¶çš„å›è°ƒå‡½æ•°ï¼Œæ­¤å½¢å¼æ—¶å¿…é¡»å†ä¼ å…¥å¯å˜å‚æ•°...æ‰èƒ½å”¯ä¸€æ ‡è®°ä¸€ä¸ªå®šæ—¶å™¨
+-- @param ... å¯å˜å‚æ•°
+-- @return number å¼€å¯çŠ¶æ€è¿”å›trueï¼Œå¦åˆ™nil
+function timerIsActive(val, ...)
+    if type(val) == "number" then
+        return timerPool[val]
+    else
+        for k, v in pairs(timerPool) do
+            if v == val then
+                if cmpTable(arg, para[k]) then return true end
+            end
+        end
+    end
 end
 
 
---[[
-º¯ÊıÃû£ºaddapp
-¹¦ÄÜ  £ºÔö¼Óapp
-²ÎÊı  £º
-		app£ºÄ³¸öapp£¬ÓĞÒÔÏÂÁ½ÖÖĞÎÊ½£º
-		     Èç¹ûÊÇÒÔº¯Êı·½Ê½×¢²áµÄapp£¬ÀıÈçregapp(fncname,"MSG1","MSG2","MSG3"),ÔòĞÎÊ½Îª£º{procer=arg[1],"MSG1","MSG2","MSG3"}
-			 Èç¹ûÊÇÒÔtable·½Ê½×¢²áµÄapp£¬ÀıÈçregapp({MSG1=fnc1,MSG2=fnc2,MSG3=fnc3}),ÔòĞÎÊ½Îª{MSG1=fnc1,MSG2=fnc2,MSG3=fnc3}
-·µ»ØÖµ£ºÎŞ
-]] 
-local function addapp(app)
-	-- ²åÈëÎ²²¿
-	table.insert(apps,#apps+1,app)
+------------------------------------------ LUAåº”ç”¨æ¶ˆæ¯è®¢é˜…/å‘å¸ƒæ¥å£ ------------------------------------------
+-- è®¢é˜…è€…åˆ—è¡¨
+local subscribers = {}
+--å†…éƒ¨æ¶ˆæ¯é˜Ÿåˆ—
+local messageQueue = {}
+
+--- è®¢é˜…æ¶ˆæ¯
+-- @param id æ¶ˆæ¯id
+-- @param callback æ¶ˆæ¯å›è°ƒå¤„ç†
+-- @usage subscribe("NET_STATUS_IND", callback)
+function subscribe(id, callback)
+    if type(id) ~= "string" or (type(callback) ~= "function" and type(callback) ~= "thread") then
+        log.warn("warning: sys.subscribe invalid parameter", id, callback)
+        return
+    end
+    if not subscribers[id] then subscribers[id] = {} end
+    subscribers[id][callback] = true
 end
 
---[[
-º¯ÊıÃû£ºremoveapp
-¹¦ÄÜ  £ºÒÆ³ıapp
-²ÎÊı  £º
-		id£ºappµÄid£¬id¹²ÓĞÁ½ÖÖ·½Ê½£¬Ò»ÖÖÊÇº¯ÊıÃû£¬ÁíÒ»ÖÖÊÇtableÃû
-·µ»ØÖµ£ºÎŞ
-]] 
-local function removeapp(id)
-	--±éÀúapp±í
-	for k,v in ipairs(apps) do
-		--appµÄidÈç¹ûÊÇº¯ÊıÃû
-		if type(id) == "function" then
-			if v.procer == id then
-				table.remove(apps,k)
-				return
-			end
-		--appµÄidÈç¹ûÊÇtableÃû
-		elseif v == id then
-			table.remove(apps,k)
-			return
-		end
-	end
+--- å–æ¶ˆè®¢é˜…æ¶ˆæ¯
+-- @param id æ¶ˆæ¯id
+-- @param callback æ¶ˆæ¯å›è°ƒå¤„ç†
+-- @usage unsubscribe("NET_STATUS_IND", callback)
+function unsubscribe(id, callback)
+    if type(id) ~= "string" or (type(callback) ~= "function" and type(callback) ~= "thread") then
+        log.warn("warning: sys.unsubscribe invalid parameter", id, callback)
+        return
+    end
+    if subscribers[id] then subscribers[id][callback] = nil end
 end
 
---[[
-º¯ÊıÃû£ºcallapp
-¹¦ÄÜ  £º´¦ÀíÄÚ²¿ÏûÏ¢
-		Í¨¹ı±éÀúÃ¿¸öapp½øĞĞ´¦Àí
-²ÎÊı  £º
-		msg£ºÏûÏ¢
-·µ»ØÖµ£ºÎŞ
-]] 
-local function callapp(msg)
-	local id = msg[1]
-	--Ôö¼ÓappÏûÏ¢
-	if id == "SYS_ADD_APP" then
-		addapp(unpack(msg,2,#msg))
-	--ÒÆ³ıappÏûÏ¢
-	elseif id == "SYS_REMOVE_APP" then
-		removeapp(unpack(msg,2,#msg))
-	else
-		local app
-		--±éÀúapp±í
-		for i=#apps,1,-1 do
-			app = apps[i]
-			--º¯Êı×¢²á·½Ê½µÄapp,´øÏûÏ¢idÍ¨Öª
-			if app.procer then 
-				for _,v in ipairs(app) do
-					if v == id then
-						--Èç¹ûÏûÏ¢µÄ´¦Àíº¯ÊıÃ»ÓĞ·µ»Øtrue£¬Ôò´ËÏûÏ¢µÄÉúÃüÆÚ½áÊø£»·ñÔòÒ»Ö±±éÀúapp
-						if app.procer(unpack(msg)) ~= true then
-							return
-						end
-					end
-				end
-			--table×¢²á·½Ê½µÄapp,²»´øÏûÏ¢idÍ¨Öª
-			elseif app[id] then 
-				--Èç¹ûÏûÏ¢µÄ´¦Àíº¯ÊıÃ»ÓĞ·µ»Øtrue£¬Ôò´ËÏûÏ¢µÄÉúÃüÆÚ½áÊø£»·ñÔòÒ»Ö±±éÀúapp
-				if app[id](unpack(msg,2,#msg)) ~= true then
-					return
-				end
-			end
-		end
-	end
+--- å‘å¸ƒå†…éƒ¨æ¶ˆæ¯ï¼Œå­˜å‚¨åœ¨å†…éƒ¨æ¶ˆæ¯é˜Ÿåˆ—ä¸­
+-- @param ... å¯å˜å‚æ•°ï¼Œç”¨æˆ·è‡ªå®šä¹‰
+-- @return æ— 
+-- @usage publish("NET_STATUS_IND")
+function publish(...)
+    table.insert(messageQueue, arg)
 end
 
---ÄÚ²¿ÏûÏ¢¶ÓÁĞ
-local qmsg = {}
-
---[[
-º¯ÊıÃû£ºdispatch
-¹¦ÄÜ  £º²úÉúÄÚ²¿ÏûÏ¢£¬´æ´¢ÔÚÄÚ²¿ÏûÏ¢¶ÓÁĞÖĞ
-²ÎÊı  £º¿É±ä²ÎÊı£¬ÓÃ»§×Ô¶¨Òå
-·µ»ØÖµ£ºÎŞ
-]] 
-function dispatch(...)
-	table.insert(qmsg,arg)
+-- åˆ†å‘æ¶ˆæ¯
+local function dispatch()
+    while true do
+        if #messageQueue == 0 then
+            break
+        end
+        local message = table.remove(messageQueue, 1)
+        if subscribers[message[1]] then
+            for callback, _ in pairs(subscribers[message[1]]) do
+                if type(callback) == "function" then
+                    callback(unpack(message, 2, #message))
+                elseif type(callback) == "thread" then
+                    coroutine.resume(callback, unpack(message))
+                end
+            end
+        end
+    end
 end
 
---[[
-º¯ÊıÃû£ºgetmsg
-¹¦ÄÜ  £º¶ÁÈ¡ÄÚ²¿ÏûÏ¢
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÄÚ²¿ÏûÏ¢¶ÓÁĞÖĞµÄµÚÒ»¸öÏûÏ¢£¬²»´æÔÚÔò·µ»Ønil
-]] 
-local function getmsg()
-	if #qmsg == 0 then
-		return nil
-	end
-
-	return table.remove(qmsg,1)
-end
-
---½çÃæË¢ĞÂÄÚ²¿ÏûÏ¢
-local refreshmsg = {"MMI_REFRESH_IND"}
-
---[[
-º¯ÊıÃû£ºrunqmsg
-¹¦ÄÜ  £º´¦ÀíÄÚ²¿ÏûÏ¢
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]] 
-local function runqmsg()
-	local inmsg
-
-	while true do
-		--¶ÁÈ¡ÄÚ²¿ÏûÏ¢
-		inmsg = getmsg()
-		--ÄÚ²¿ÏûÏ¢Îª¿Õ
-		if inmsg == nil then
-			--ĞèÒªË¢ĞÂ½çÃæ
-			if refreshflag == true then
-				refreshflag = false
-				--²úÉúÒ»¸ö½çÃæË¢ĞÂÄÚ²¿ÏûÏ¢
-				inmsg = refreshmsg
-			else
-				break
-			end
-		end
-		--´¦ÀíÄÚ²¿ÏûÏ¢
-		callapp(inmsg)
-	end
-end
-
---¡°³ı¶¨Ê±Æ÷ÏûÏ¢¡¢ÎïÀí´®¿ÚÏûÏ¢ÍâµÄÆäËûÍâ²¿ÏûÏ¢£¨ÀıÈçATÃüÁîµÄĞéÄâ´®¿ÚÊı¾İ½ÓÊÕÏûÏ¢¡¢ÒôÆµÏûÏ¢¡¢³äµç¹ÜÀíÏûÏ¢¡¢°´¼üÏûÏ¢µÈ£©¡±µÄ´¦Àíº¯Êı±í
+-- rtosæ¶ˆæ¯å›è°ƒ
 local handlers = {}
-base.setmetatable(handlers,{__index = function() return function() end end,})
+setmetatable(handlers, {__index = function() return function() end end, })
 
---[[
-º¯ÊıÃû£ºregmsg
-¹¦ÄÜ  £º×¢²á¡°³ı¶¨Ê±Æ÷ÏûÏ¢¡¢ÎïÀí´®¿ÚÏûÏ¢ÍâµÄÆäËûÍâ²¿ÏûÏ¢£¨ÀıÈçATÃüÁîµÄĞéÄâ´®¿ÚÊı¾İ½ÓÊÕÏûÏ¢¡¢ÒôÆµÏûÏ¢¡¢³äµç¹ÜÀíÏûÏ¢¡¢°´¼üÏûÏ¢µÈ£©¡±µÄ´¦Àíº¯Êı
-²ÎÊı  £º
-		id£ºÏûÏ¢ÀàĞÍid
-		fnc£ºÏûÏ¢´¦Àíº¯Êı
-·µ»ØÖµ£ºÎŞ
-]] 
-function regmsg(id,handler)
-	handlers[id] = handler
+--- æ³¨å†Œrtosæ¶ˆæ¯å›è°ƒå¤„ç†å‡½æ•°
+-- @number id æ¶ˆæ¯ç±»å‹id
+-- @param handler æ¶ˆæ¯å¤„ç†å‡½æ•°
+-- @return æ— 
+-- @usage rtos.on(rtos.MSG_KEYPAD, function(param) handle keypad message end)
+rtos.on = function(id, handler)
+    handlers[id] = handler
 end
 
---¸÷¸öÎïÀí´®¿ÚµÄÊı¾İ½ÓÊÕ´¦Àíº¯Êı±í
-local uartprocs = {}
-
---¸÷¸öÎïÀí´®¿ÚµÄÊı¾İ·¢ËÍÍê³ÉÍ¨Öªº¯Êı±í
-local uartxprocs = {}
-
---[[
-º¯ÊıÃû£ºreguart
-¹¦ÄÜ  £º×¢²áÎïÀí´®¿ÚµÄÊı¾İ½ÓÊÕ´¦Àíº¯Êı
-²ÎÊı  £º
-		id£ºÎïÀí´®¿ÚºÅ£¬1±íÊ¾UART1£¬2±íÊ¾UART2
-		fnc£ºÊı¾İ½ÓÊÕ´¦Àíº¯ÊıÃû
-		clearRcvBuf£ºÊÇ·ñÇå¿Õµ±Ç°½ÓÊÕ»º³åÇøÀïÃæµÄÊı¾İ£¬true±íÊ¾Çå¿Õ£¬false»òÕßnil±íÊ¾²»Çå¿Õ	
-·µ»ØÖµ£ºÎŞ
-]] 
-function reguart(id,fnc,clearRcvBuf)
-	uartprocs[id] = fnc
-	if clearRcvBuf and uart.clear then uart.clear(id,uart.RECV_BUF) end
+------------------------------------------ Luat ä¸»è°ƒåº¦æ¡†æ¶  ------------------------------------------
+local function safeRun()
+    -- åˆ†å‘å†…éƒ¨æ¶ˆæ¯
+    dispatch()
+    -- é˜»å¡è¯»å–å¤–éƒ¨æ¶ˆæ¯
+    local msg, param, exparam = rtos.receive(rtos.INF_TIMEOUT)
+    -- åˆ¤æ–­æ˜¯å¦ä¸ºå®šæ—¶å™¨æ¶ˆæ¯ï¼Œå¹¶ä¸”æ¶ˆæ¯æ˜¯å¦æ³¨å†Œ
+    if msg == rtos.MSG_TIMER and timerPool[param] then
+        if param < TASK_TIMER_ID_MAX then
+            local taskId = timerPool[param]
+            timerPool[param] = nil
+            if taskTimerPool[taskId] == param then
+                taskTimerPool[taskId] = nil
+                coroutine.resume(taskId)
+            end
+        else
+            local cb = timerPool[param]
+            --å¦‚æœä¸æ˜¯å¾ªç¯å®šæ—¶å™¨ï¼Œä»å®šæ—¶å™¨idè¡¨ä¸­åˆ é™¤æ­¤å®šæ—¶å™¨
+            if not loop[param] then timerPool[param] = nil end
+            if para[param] ~= nil then
+                cb(unpack(para[param]))
+                if not loop[param] then para[param] = nil end
+            else
+                cb()
+            end
+            --å¦‚æœæ˜¯å¾ªç¯å®šæ—¶å™¨ï¼Œç»§ç»­å¯åŠ¨æ­¤å®šæ—¶å™¨
+            if loop[param] then rtos.timer_start(param, loop[param]) end
+        end
+    --å…¶ä»–æ¶ˆæ¯ï¼ˆéŸ³é¢‘æ¶ˆæ¯ã€å……ç”µç®¡ç†æ¶ˆæ¯ã€æŒ‰é”®æ¶ˆæ¯ç­‰ï¼‰
+    elseif type(msg) == "number" then
+        handlers[msg](param, exparam)
+    else
+        handlers[msg.id](msg)
+    end
 end
 
---[[
-º¯ÊıÃû£ºreguartx
-¹¦ÄÜ  £º×¢²áÎïÀí´®¿ÚµÄÊı¾İ·¢ËÍÍê³É´¦Àíº¯Êı
-²ÎÊı  £º
-		id£ºÎïÀí´®¿ÚºÅ£¬1±íÊ¾UART1£¬2±íÊ¾UART2
-		fnc£ºµ÷ÓÃuart.write½Ó¿Ú·¢ËÍÊı¾İ£¬Êı¾İ·¢ËÍÍê³ÉºóµÄ»Øµ÷º¯Êı
-·µ»ØÖµ£ºÎŞ
-]] 
-function reguartx(id,fnc)
-	uartxprocs[id] = fnc
-end
-
-function setrestore(restoreFlag)
-	sRestoreFlag = restoreFlag
-end
-
---[[
-º¯ÊıÃû£ºsetrestart(¾¯¸æ£º´Ë½Ó¿ÚÖ»ÔÊĞíupdate.lua¡¢dbg.lua¡¢aliyuniotota.luaµ÷ÓÃ£¬ÆäËûµØ·½²»ÒªÊ¹ÓÃ)
-¹¦ÄÜ  £ºÉèÖÃÊÇ·ñÔÊĞí¡°½Å±¾Òì³£Ê± »òÕß ½Å±¾µ÷ÓÃsys.restart½Ó¿ÚÊ±¡±µÄÖØÆô¹¦ÄÜ
-²ÎÊı  £º
-		flg£ºtrueÔÊĞíÖØÆô£¬ÆäÓà²»ÔÊĞíÖØÆô
-		tag£º1¡¢2¡¢4£¬1±íÊ¾update£¬2±íÊ¾dbg£¬4±íÊ¾aliyuniotota
-·µ»ØÖµ£ºÎŞ
-]] 
-function setrestart(flg,tag)
-	if flg then
-		if bit.band(restartflg,tag)~=0 then restartflg = restartflg-tag end
-	else
-		if bit.band(restartflg,tag)==0 then restartflg = restartflg+tag end
-	end
-	if flg and restartflg==0 and restartpending then restart("restartpending") end
-end
-
-local msg,msgpara,msgpara2
-function saferun()
-	--while true do
-		--´¦ÀíÄÚ²¿ÏûÏ¢
-		runqmsg()
-		--×èÈû¶ÁÈ¡Íâ²¿ÏûÏ¢
-		msg,msgpara,msgpara2 = rtos.receive(rtos.INF_TIMEOUT)
-
-		--µç³ØµçÁ¿Îª0%£¬ÓÃ»§Ó¦ÓÃ½Å±¾ÖĞÃ»ÓĞ¶¨Òå¡°µÍµç¹Ø»ú´¦Àí³ÌĞò¡±£¬²¢ÇÒÃ»ÓĞÆô¶¯×Ô¶¯¹Ø»ú¶¨Ê±Æ÷		
-		if --[[not lprfun and ]]not lpring and type(msg) == "table" and msg.id == rtos.MSG_PMD and msg.level == 0 then
-			--Æô¶¯×Ô¶¯¹Ø»ú¶¨Ê±Æ÷£¬60Ãëºó¹Ø»ú
-			lpring = true
-			timer_start(rtos.poweroff,60000,"r1")
-		end
-
-		--Íâ²¿ÏûÏ¢ÎªtableÀàĞÍ
-		if type(msg) == "table" then
-			--¶¨Ê±Æ÷ÀàĞÍÏûÏ¢
-			if msg.id == rtos.MSG_TIMER then
-				timerfnc(msg.timer_id)
-			--ATÃüÁîµÄĞéÄâ´®¿ÚÊı¾İ½ÓÊÕÏûÏ¢
-			elseif msg.id == rtos.MSG_UART_RXDATA and msg.uart_id == uart.ATC then
-				handlers.atc()
-			else
-				--ÎïÀí´®¿ÚÊı¾İ½ÓÊÕÏûÏ¢
-				if msg.id == rtos.MSG_UART_RXDATA then
-					if uartprocs[msg.uart_id] ~= nil then
-						uartprocs[msg.uart_id]()
-					else
-						handlers[msg.id](msg)
-					end
-				--´®¿Ú·¢ËÍÊı¾İÍê³ÉÏûÏ¢
-				elseif msg.id == rtos.MSG_UART_TX_DONE then
-					if uartxprocs[msgpara] then
-						uartxprocs[msgpara]()				
-					end
-				--ÆäËûÏûÏ¢£¨ÒôÆµÏûÏ¢¡¢³äµç¹ÜÀíÏûÏ¢¡¢°´¼üÏûÏ¢µÈ£©
-				else
-					handlers[msg.id](msg)
-				end
-			end
-		--Íâ²¿ÏûÏ¢·ÇtableÀàĞÍ
-		else
-			--¶¨Ê±Æ÷ÀàĞÍÏûÏ¢
-			if msg == rtos.MSG_TIMER then
-				timerfnc(msgpara)
-			--´®¿ÚÊı¾İ½ÓÊÕÏûÏ¢
-			elseif msg == rtos.MSG_UART_RXDATA then
-				--ATÃüÁîµÄĞéÄâ´®¿Ú
-				if msgpara == uart.ATC then
-					handlers.atc()
-				--ÎïÀí´®¿Ú
-				else
-					if uartprocs[msgpara] ~= nil then
-						uartprocs[msgpara](msgpara,msgpara2)
-					else
-						handlers[msg](msg,msgpara)
-					end
-				end
-			--´®¿Ú·¢ËÍÊı¾İÍê³ÉÏûÏ¢
-			elseif msg == rtos.MSG_UART_TX_DONE then
-				if uartxprocs[msgpara] then
-					uartxprocs[msgpara]()				
-				end
-			else
-				handlers[msg](msg)
-			end
-		end
-		--´òÓ¡lua½Å±¾³ÌĞòÕ¼ÓÃµÄÄÚ´æ£¬µ¥Î»ÊÇK×Ö½Ú
-		--print("mem:",base.collectgarbage("count"))
-	--end
-end
-
---[[
-º¯ÊıÃû£ºrun
-¹¦ÄÜ  £ºluaÓ¦ÓÃ³ÌĞòÔËĞĞ¿ò¼ÜÈë¿Ú
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-
-ÔËĞĞ¿ò¼Ü»ùÓÚÏûÏ¢´¦Àí»úÖÆ£¬Ä¿Ç°Ò»¹²Á½ÖÖÏûÏ¢£ºÄÚ²¿ÏûÏ¢ºÍÍâ²¿ÏûÏ¢
-ÄÚ²¿ÏûÏ¢£ºlua½Å±¾µ÷ÓÃ±¾ÎÄ¼şdispatch½Ó¿Ú²úÉúµÄÏûÏ¢£¬ÏûÏ¢´æ´¢ÔÚqmsg±íÖĞ
-Íâ²¿ÏûÏ¢£ºµ×²ãcoreÈí¼ş²úÉúµÄÏûÏ¢£¬lua½Å±¾Í¨¹ırtos.receive½Ó¿Ú¶ÁÈ¡ÕâĞ©Íâ²¿ÏûÏ¢
-]] 
+--- run()ä»åº•å±‚è·å–coreæ¶ˆæ¯å¹¶åŠæ—¶å¤„ç†ç›¸å…³æ¶ˆæ¯ï¼ŒæŸ¥è¯¢å®šæ—¶å™¨å¹¶è°ƒåº¦å„æ³¨å†ŒæˆåŠŸçš„ä»»åŠ¡çº¿ç¨‹è¿è¡Œå’ŒæŒ‚èµ·
+-- @return æ— 
+-- @usage sys.run()
 function run()
-	local status,err
-	while true do
-		if luarunerr==2 or restartflg==0 then
-			if sRestoreFlag then
-				saferun()
-			else
-				status,err = pcall(saferun)
-				if not status then saferestart(err or "") rtos.restart() end
-			end
-		else		
-			status,err = pcall(saferun)
-			--ÔËĞĞ³ö´í
-			if not status then
-				print("run",status,err)
-				luarunerr = 1
-				saferestart(err or "")			
-			end
-		end
-	end
+    local result, err
+    while true do
+        if sRollBack then
+            safeRun()
+        else
+            result, err = pcall(safeRun)
+            if not result then restart(err) end
+        end
+    end
 end
+
+--- è®¾ç½®â€œluaè„šæœ¬è¿è¡Œå‡ºé”™æ—¶ï¼Œæ˜¯å¦å›é€€åŸå§‹çƒ§å†™ç‰ˆæœ¬â€çš„åŠŸèƒ½å¼€å…³ã€‚å¦‚æœæ²¡æœ‰è°ƒç”¨æ­¤æ¥å£è®¾ç½®ï¼Œé»˜è®¤å›æ»š
+-- è®¾ç½®ä¸å…è®¸å›æ»šåŠŸèƒ½æ—¶ï¼Œè¦åŒæ—¶è®¾ç½®ä¸€ä¸ªå¼€æœºæ—¶é—´é˜€å€¼ï¼Œè¶…è¿‡è¿™ä¸ªæ—¶é—´ï¼Œæ‰ä¸å…è®¸å›æ»š
+-- @bool flagï¼Œâ€œluaè„šæœ¬è¿è¡Œå‡ºé”™æ—¶ï¼Œæ˜¯å¦å›é€€åŸå§‹çƒ§å†™ç‰ˆæœ¬â€çš„æ ‡å¿—ï¼Œtrueè¡¨ç¤ºå…è®¸å›æ»šï¼Œfalseè¡¨ç¤ºä¸å…è®¸å›æ»š
+-- @number[opt=300] secsï¼Œå½“é…ç½®ä¸å…è®¸å›æ»šæ—¶ï¼Œæ­¤å‚æ•°æ‰æœ‰æ„ä¹‰ã€æ³¨æ„ï¼šLuat_V0036_XXXXä»¥åŠä»¥åçš„coreç‰ˆæœ¬æ‰æ”¯æŒæ­¤åŠŸèƒ½ï¼Œæ­¤å‚æ•°é™åˆ¶çš„æ˜¯è„šæœ¬ç¨‹åºæ— æ³•æ•è·çš„coreä¸­luaè™šæ‹Ÿæœºå¼‚å¸¸ã€‘ï¼›
+--      è¡¨ç¤ºä¸€ä¸ªå¼€æœºæ—¶é—´é˜€å€¼ï¼Œè¶…è¿‡è¿™ä¸ªæ—¶é—´ï¼Œæ‰ä¸å…è®¸å›æ»šï¼›å–å€¼èŒƒå›´å¦‚ä¸‹ï¼š
+--      1åˆ°72*3600ï¼šå•ä½ä¸ºç§’ï¼›è¡¨ç¤ºâ€œå¼€æœºåï¼Œåœ¨æ­¤æ—¶é—´èŒƒå›´å†…å‘ç”Ÿå¼‚å¸¸ï¼Œå…è®¸å›æ»šâ€ï¼›ä¾‹å¦‚300ç§’ï¼Œè¡¨ç¤ºå¼€æœºè¿è¡Œ5åˆ†é’Ÿå†…çš„é”™è¯¯å…è®¸å›æ»šï¼Œ5åˆ†é’Ÿåçš„é”™è¯¯ä¸å…è®¸å›æ»š
+-- @return nil
+-- @usage
+-- sys.setRollBack(true)
+-- sys.setRollBack(false)
+function setRollBack(flag,secs)
+    sRollBack = flag
+    secs = secs or 300
+    if type(rtos.set_script_rollback)=="function" then
+        rtos.set_script_rollback(1)
+        if not flag then
+            assert(secs>=1 and secs<=72*3600)
+            timerStart(rtos.set_script_rollback,secs*1000,0)
+        end
+    end
+end
+
+require "clib"

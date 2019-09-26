@@ -1,29 +1,35 @@
-local base = _G
-local ril = require"ril"
-local sys = require"sys"
-local string = require"string"
+--- æ¨¡å—åŠŸèƒ½ï¼šç”µè¯ç°¿ç®¡ç†
+-- @module pb
+-- @author openLuat
+-- @license MIT
+-- @copyright openLuat
+-- @release 2018.03.10
 
-module("pb")
+module(..., package.seeall)
 
-local print,tonumber,req,dispatch = base.print,base.tonumber,ril.request,sys.dispatch
-local smatch = string.match
+require"ril"
+
+local req = ril.request
+
 local storagecb,readcb,writecb,deletecb
 
---[[
-º¯ÊıÃû£ºsetstorage
-¹¦ÄÜ  £ºÉèÖÃµç»°±¾´æ´¢ÇøÓò
-²ÎÊı  £º
-		str£ºstringÀàĞÍ£¬´æ´¢ÇøÓò×Ö·û´®£¬½öÖ§³Ö"ME"ºÍ"SM"
-		cb£ºÉèÖÃºóµÄ»Øµ÷º¯Êı
-·µ»ØÖµ£ºÎŞ
-]]
-function setstorage(str,cb)
-	if str=="SM" or str=="ME" then
+--- è®¾ç½®ç”µè¯æœ¬å­˜å‚¨åŒºåŸŸ
+-- @string storage, å­˜å‚¨åŒºåŸŸå­—ç¬¦ä¸²ï¼Œä»…æ”¯æŒ"ME"å’Œ"SM"
+-- @param cb, è®¾ç½®åçš„å›è°ƒå‡½æ•°
+--
+-- å›è°ƒæ–¹å¼ä¸ºcb(result)ï¼Œresultä¸ºtrueè¡¨ç¤ºæˆåŠŸï¼Œfalseæˆ–è€…nilè¡¨ç¤ºå¤±è´¥
+-- @return æ— 
+-- @usage pb.setStorage(storage,cb)
+function setStorage(storage,cb)
+	if storage=="SM" or storage=="ME" then
 		storagecb = cb
-		req("AT+CPBS=\"" .. str .. "\"" )
+		req("AT+CPBS=\"" .. storage .. "\"" )
 	end
 end
-
+-- æŸ¥æ‰¾ç”¨æˆ·åæ˜¯å¦å­˜åœ¨
+-- @string nameï¼Œå§“å
+-- @return booleï¼Œtrueå­˜åœ¨ï¼Œfalseä¸å­˜åœ¨
+-- @usage pb.find(name)
 function find(name)
 	if name == "" or name == nil then
 		return	false
@@ -32,14 +38,12 @@ function find(name)
 	return true
 end
 
---[[
-º¯ÊıÃû£ºread
-¹¦ÄÜ  £º¶ÁÈ¡Ò»Ìõµç»°±¾¼ÇÂ¼
-²ÎÊı  £º
-		index£ºnumberÀàĞÍ£¬µç»°±¾ÔÚ´æ´¢ÇøµÄÎ»ÖÃ
-		cb£º¶ÁÈ¡ºóµÄ»Øµ÷º¯Êı
-·µ»ØÖµ£ºÎŞ
-]]
+--- è¯»å–ä¸€æ¡ç”µè¯æœ¬è®°å½•
+-- @number indexï¼Œç”µè¯æœ¬åœ¨å­˜å‚¨åŒºçš„ä½ç½®
+-- @function cbï¼Œfunctionç±»å‹ï¼Œè¯»å–åçš„å›è°ƒå‡½æ•°
+--
+-- å›è°ƒæ–¹å¼ä¸ºcb(result,name,number)ï¼šresultä¸ºtrueè¡¨ç¤ºæˆåŠŸï¼Œfalseæˆ–è€…nilè¡¨ç¤ºå¤±è´¥ï¼›nameä¸ºå§“åï¼›numberä¸ºå·ç 
+-- @usage pb.read(1,cb)
 function read(index,cb)
 	if index == "" or index == nil then
 		return false
@@ -48,17 +52,16 @@ function read(index,cb)
 	req("AT+CPBR=" .. index)
 end
 
---[[
-º¯ÊıÃû£ºwriteitem
-¹¦ÄÜ  £ºĞ´Ò»Ìõµç»°±¾¼ÇÂ¼
-²ÎÊı  £º
-		index£ºnumberÀàĞÍ£¬µç»°±¾ÔÚ´æ´¢ÇøµÄÎ»ÖÃ
-		name£ºĞÕÃû
-		num£ººÅÂë
-		cb£ºĞ´ÈëºóµÄ»Øµ÷º¯Êı
-·µ»ØÖµ£ºÎŞ
-]]
-function writeitem(index,name,num,cb)
+--- å†™å…¥ä¸€æ¡ç”µè¯æœ¬è®°å½•
+-- @number indexï¼Œç”µè¯æœ¬åœ¨å­˜å‚¨åŒºçš„ä½ç½®
+-- @string nameï¼Œå§“å
+-- @string numï¼Œå·ç 
+-- @function cb, functionlç±»å‹ï¼Œå†™å…¥åçš„å›è°ƒå‡½æ•°
+--
+-- å›è°ƒæ–¹å¼ä¸ºcb(result)ï¼šresultä¸ºtrueè¡¨ç¤ºæˆåŠŸï¼Œfalseæˆ–è€…nilè¡¨ç¤ºå¤±è´¥
+-- @return æ— 
+-- @usage pb.write(1,"zhangsan","13233334444",cb)
+function write(index,name,num,cb)
 	if num == nil or name == nil or index == nil then
 		return false
 	end
@@ -67,49 +70,49 @@ function writeitem(index,name,num,cb)
 	return true
 end
 
---[[
-º¯ÊıÃû£ºdeleteitem
-¹¦ÄÜ  £ºÉ¾³ıÒ»Ìõµç»°±¾¼ÇÂ¼
-²ÎÊı  £º
-		i£ºnumberÀàĞÍ£¬µç»°±¾ÔÚ´æ´¢ÇøµÄÎ»ÖÃ
-		cb£ºÉ¾³ıºóµÄ»Øµ÷º¯Êı
-·µ»ØÖµ£ºÎŞ
-]]
-function deleteitem(i,cb)
-	if i == "" or i == nil then
+
+--- åˆ é™¤ä¸€æ¡ç”µè¯æœ¬è®°å½•
+-- @number index, ç”µè¯æœ¬åœ¨å­˜å‚¨åŒºçš„ä½ç½®
+-- @function cb, functionç±»å‹ï¼Œåˆ é™¤åçš„å›è°ƒå‡½æ•°
+--
+-- å›è°ƒæ–¹å¼ä¸ºcb(result)ï¼šresultä¸ºtrueè¡¨ç¤ºæˆåŠŸï¼Œfalseæˆ–è€…nilè¡¨ç¤ºå¤±è´¥
+-- @return æ— 
+-- @usage pb.delete(1,cb)
+function delete(index,cb)
+	if index == "" or index == nil then
 		return false
 	end
 	deletecb = cb
-	req("AT+CPBW=" .. i)
+	req("AT+CPBW=" .. index)
 	return true
 end
 
 local function pbrsp(cmd,success,response,intermediate)
-	local prefix = smatch(cmd,"AT(%+%u+%?*)")
+	local prefix = string.match(cmd,"AT(%+%u+%?*)")
 	intermediate = intermediate or ""
 
 	if prefix == "+CPBF"  then
 		local name = string.match(cmd,"AT%+CPBF%s*=%s*\"(%w*)\"")
 		if intermediate == "" then
-			dispatch("PB_FIND_CNF",success,"","",name)
+			sys.publish("PB_FIND_CNF",success,"","",name)
 		else
 			for w in string.gmatch(intermediate, "(.-)\r\n") do
-				local index,n = smatch(w,"+CPBF:%s*(%d+),\"([#%*%+%d]*)\",%d+,")
+				local index,n = string.match(w,"+CPBF:%s*(%d+),\"([#%*%+%d]*)\",%d+,")
 				index = index or ""
 				n = n or ""
-				dispatch("PB_FIND_CNF",success,index,n,name)
+				sys.publish("PB_FIND_CNF",success,index,n,name)
 			end
 		end
 	elseif prefix == "+CPBR" then
 		local index = string.match(cmd,"AT%+CPBR%s*=%s*(%d+)")
-		local num,name = smatch(intermediate,"+CPBR:%s*%d+,\"([#%*%+%d]*)\",%d+,\"(%w*)\"")
+		local num,name = string.match(intermediate,"+CPBR:%s*%d+,\"([#%*%+%d]*)\",%d+,\"(%w*)\"")
 		num,name = num or "",name or ""
-		dispatch("PB_READ_CNF",success,index,num,name)
+		sys.publish("PB_READ_CNF",success,index,num,name)
 		local cb = readcb
 		readcb = nil
 		if cb then cb(success,name,num) return end
 	elseif prefix == "+CPBW" then
-		dispatch("PB_WRITE_CNF",success)
+		sys.publish("PB_WRITE_CNF",success)
 		local cb = writecb
 		writecb = nil
 		if cb then cb(success) return end
@@ -117,9 +120,9 @@ local function pbrsp(cmd,success,response,intermediate)
 		deletecb = nil
 		if cb then cb(success) return end
 	elseif prefix == "+CPBS?" then
-		local storage,used,total = smatch(intermediate,"+CPBS:%s*\"(%u+)\",(%d+),(%d+)")
+		local storage,used,total = string.match(intermediate,"+CPBS:%s*\"(%u+)\",(%d+),(%d+)")
 		used,total = tonumber(used),tonumber(total)
-		dispatch("CPBS_READ_CNF",success,storage,used,total)
+		sys.publish("CPBS_READ_CNF",success,storage,used,total)
 	elseif prefix == "+CPBS" then
 		local cb = storagecb
 		storagecb = nil
@@ -127,8 +130,8 @@ local function pbrsp(cmd,success,response,intermediate)
     end
 end
 
-ril.regrsp("+CPBF",pbrsp)
-ril.regrsp("+CPBR",pbrsp)
-ril.regrsp("+CPBW",pbrsp)
-ril.regrsp("+CPBS",pbrsp)
-ril.regrsp("+CPBS?",pbrsp)
+ril.regRsp("+CPBF",pbrsp)
+ril.regRsp("+CPBR",pbrsp)
+ril.regRsp("+CPBW",pbrsp)
+ril.regRsp("+CPBS",pbrsp)
+ril.regRsp("+CPBS?",pbrsp)

@@ -1,395 +1,308 @@
---[[
-Ä£¿éÃû³Æ£ºÍ¨ÓÃ¿âº¯Êı
-Ä£¿é¹¦ÄÜ£º±àÂë¸ñÊ½×ª»»¡¢Ê±ÇøÊ±¼ä×ª»»
-Ä£¿é×îºóĞŞ¸ÄÊ±¼ä£º2017.02.20
-]]
+---æ¨¡å—åŠŸèƒ½ï¼šé€šç”¨åº“å‡½æ•°ã€ç¼–ç æ ¼å¼è½¬æ¢ã€æ—¶åŒºæ—¶é—´è½¬æ¢
+-- @module common
+-- @author openLuat
+-- @license MIT
+-- @copyright openLuat
+-- @release 2017.02.20
+--å®šä¹‰æ¨¡å—,å¯¼å…¥ä¾èµ–åº“
+module(..., package.seeall)
 
---¶¨ÒåÄ£¿é,µ¼ÈëÒÀÀµ¿â
-module(...,package.seeall)
+--åŠ è½½å¸¸ç”¨çš„å…¨å±€å‡½æ•°è‡³æœ¬åœ°
+local tinsert, ssub, sbyte, schar, sformat, slen = table.insert, string.sub, string.byte, string.char, string.format, string.len
 
---¼ÓÔØ³£ÓÃµÄÈ«¾Öº¯ÊıÖÁ±¾µØ
-local tinsert,ssub,sbyte,schar,sformat,slen = table.insert,string.sub,string.byte,string.char,string.format,string.len
-
---[[
-º¯ÊıÃû£ºucs2toascii
-¹¦ÄÜ  £ºascii×Ö·û´®µÄunicode±àÂëµÄ16½øÖÆ×Ö·û´® ×ª»¯Îª ascii×Ö·û´®£¬ÀıÈç"0031003200330034" -> "1234"
-²ÎÊı  £º
-		inum£º´ı×ª»»×Ö·û´®
-·µ»ØÖµ£º×ª»»ºóµÄ×Ö·û´®
-]]
-function ucs2toascii(inum)
-	local tonum = {}
-	for i=1,slen(inum),4 do
-		tinsert(tonum,tonumber(ssub(inum,i,i+3),16)%256)
-	end
-
-	return schar(unpack(tonum))
-end
-
---[[
-º¯ÊıÃû£ºnstrToUcs2Hex
-¹¦ÄÜ  £ºascii×Ö·û´® ×ª»¯Îª ascii×Ö·û´®µÄunicode±àÂëµÄ16½øÖÆ×Ö·û´®£¬½öÖ§³ÖÊı×ÖºÍ+£¬ÀıÈç"+1234" -> "002B0031003200330034"
-²ÎÊı  £º
-		inum£º´ı×ª»»×Ö·û´®
-·µ»ØÖµ£º×ª»»ºóµÄ×Ö·û´®
-]]
-function nstrToUcs2Hex(inum)
-	local hexs = ""
-	local elem = ""
-
-	for i=1,slen(inum) do
-		elem = ssub(inum,i,i)
-		if elem == "+" then
-			hexs = hexs .. "002B"
-		else
-			hexs = hexs .. "003" .. elem
-		end
-	end
-
-	return hexs
-end
-
---[[
-º¯ÊıÃû£ºnumtobcdnum
-¹¦ÄÜ  £ººÅÂëASCII×Ö·û´® ×ª»¯Îª BCD±àÂë¸ñÊ½×Ö·û´®£¬½öÖ§³ÖÊı×ÖºÍ+£¬ÀıÈç"+8618126324567" -> 91688121364265f7 £¨±íÊ¾µÚ1¸ö×Ö½ÚÊÇ0x91£¬µÚ2¸ö×Ö½ÚÎª0x68£¬......£©
-²ÎÊı  £º
-		num£º´ı×ª»»×Ö·û´®
-·µ»ØÖµ£º×ª»»ºóµÄ×Ö·û´®
-]]
-function numtobcdnum(num)
-  local len, numfix,convnum = slen(num),"81",""
-  
-  if ssub(num, 1,1) == "+" then
-    numfix = "91"
-    len = len-1
-    num = ssub(num, 2,-1)
-  end
-
-  if len%2 ~= 0 then --ÆæÊıÎ»
-    for i=1, (len-(len%2))/2  do
-      convnum = convnum .. ssub(num, i*2,i*2) .. ssub(num, i*2-1,i*2-1)
+--- asciiå­—ç¬¦ä¸²çš„unicodeç¼–ç çš„16è¿›åˆ¶å­—ç¬¦ä¸² è½¬åŒ–ä¸º asciiå­—ç¬¦ä¸²
+-- @string inNumï¼Œå¾…è½¬æ¢å­—ç¬¦ä¸²
+-- @return string dataï¼Œè½¬æ¢åçš„å­—ç¬¦ä¸²
+-- @usage 
+-- local data = common.ucs2ToAscii("0031003200330034")
+-- data is "1234"
+function ucs2ToAscii(inNum)
+    local tonum = {}
+    for i = 1, slen(inNum), 4 do
+        tinsert(tonum, tonumber(ssub(inNum, i, i + 3), 16) % 256)
     end
-    convnum = convnum .. "F" .. ssub(num,len, len)
-  else--Å¼ÊıÎ»
-    for i=1, (len-(len%2))/2  do
-      convnum = convnum .. ssub(num, i*2,i*2) .. ssub(num, i*2-1,i*2-1)
+    return schar(unpack(tonum))
+end
+--- asciiå­—ç¬¦ä¸² è½¬åŒ–ä¸º asciiå­—ç¬¦ä¸²çš„unicodeç¼–ç çš„16è¿›åˆ¶å­—ç¬¦ä¸²(ä»…æ”¯æŒæ•°å­—å’Œ+)
+-- @string inNumï¼šå¾…è½¬æ¢å­—ç¬¦ä¸²
+-- @return string data,è½¬æ¢åçš„å­—ç¬¦ä¸²
+-- @usage 
+-- local data = common.nstrToUcs2Hex("+1234")
+-- data is "002B0031003200330034"
+function nstrToUcs2Hex(inNum)
+    local hexs = ""
+    local elem = ""
+    for i = 1, slen(inNum) do
+        elem = ssub(inNum, i, i)
+        if elem == "+" then
+            hexs = hexs .. "002B"
+        else
+            hexs = hexs .. "003" .. elem
+        end
     end
-  end
-  
-  return numfix .. convnum
+    return hexs
 end
 
---[[
-º¯ÊıÃû£ºbcdnumtonum
-¹¦ÄÜ  £ºBCD±àÂë¸ñÊ½×Ö·û´® ×ª»¯Îª ºÅÂëASCII×Ö·û´®£¬½öÖ§³ÖÊı×ÖºÍ+£¬ÀıÈç91688121364265f7 £¨±íÊ¾µÚ1¸ö×Ö½ÚÊÇ0x91£¬µÚ2¸ö×Ö½ÚÎª0x68£¬......£© -> "+8618126324567"
-²ÎÊı  £º
-		num£º´ı×ª»»×Ö·û´®
-·µ»ØÖµ£º×ª»»ºóµÄ×Ö·û´®
-]]
-function bcdnumtonum(num)
-  local len, numfix,convnum = slen(num),"",""
-  
-  if len%2 ~= 0 then
-    print("your bcdnum is err " .. num)
-    return
-  end
-  
-  if ssub(num, 1,2) == "91" then
-    numfix = "+"
-  end
-  
-  len,num = len-2,ssub(num, 3,-1)
-  
-  for i=1, (len-(len%2))/2  do
-    convnum = convnum .. ssub(num, i*2,i*2) .. ssub(num, i*2-1,i*2-1)
-  end
+--- ASCIIå­—ç¬¦ä¸² è½¬åŒ–ä¸º BCDç¼–ç æ ¼å¼å­—ç¬¦ä¸²(ä»…æ”¯æŒæ•°å­—)
+-- @string inStrï¼Œå¾…è½¬æ¢å­—ç¬¦ä¸²
+-- @number destLenï¼Œè½¬æ¢åçš„å­—ç¬¦ä¸²æœŸæœ›é•¿åº¦ï¼Œå¦‚æœå®é™…ä¸è¶³ï¼Œåˆ™å¡«å……F
+-- @return string data,è½¬æ¢åçš„å­—ç¬¦ä¸²
+-- @usage 
+-- local data = common.numToBcdNum("8618126324567")
+-- data is "688121364265f7" ï¼ˆè¡¨ç¤ºç¬¬1ä¸ªå­—èŠ‚æ˜¯0x68ï¼Œç¬¬2ä¸ªå­—èŠ‚ä¸º0x81ï¼Œ......ï¼‰
+function numToBcdNum(inStr,destLen)
+    local l,t,num = string.len(inStr or ""),{}
     
-  if ssub(convnum,len,len) == "f"  or ssub(convnum,len,len) == "F" then
-    convnum = ssub(convnum, 1,-2)
-  end
-  
-  return numfix .. convnum
+    destLen = destLen or (inStr:len()+1)/2
+
+    for i=1,l,2 do
+        num = tonumber(inStr:sub(i,i+1),16)
+
+        if i==l then
+            num = 0xf0+num
+        else
+            num = (num%0x10)*0x10 + (num-(num%0x10))/0x10
+        end
+
+        table.insert(t,num)
+    end
+
+    local s = string.char(unpack(t))
+
+    l = slen(s)
+    if l < destLen then
+        s = s .. string.rep("\255",destLen-l)
+    elseif l > destLen then
+        s = ssub(s,1,destLen)
+    end
+
+    return s
 end
 
---[[
-º¯ÊıÃû£ºbinstohexs
-¹¦ÄÜ  £º¶ş½øÖÆÊı¾İ ×ª»¯Îª 16½øÖÆ×Ö·û´®¸ñÊ½£¬ÀıÈç91688121364265f7 £¨±íÊ¾µÚ1¸ö×Ö½ÚÊÇ0x91£¬µÚ2¸ö×Ö½ÚÎª0x68£¬......£© -> "91688121364265f7"
-²ÎÊı  £º
-		bins£º¶ş½øÖÆÊı¾İ
-		s£º×ª»»ºó£¬Ã¿Á½¸ö×Ö½ÚÖ®¼äµÄ·Ö¸ô·û£¬Ä¬ÈÏÃ»ÓĞ·Ö¸ô·û
-·µ»ØÖµ£º×ª»»ºóµÄ×Ö·û´®
-]]
-function binstohexs(bins,s)
-	local hexs = "" 
-
-	if bins == nil or type(bins) ~= "string" then return nil,"nil input string" end
-
-	for i=1,slen(bins) do
-		hexs = hexs .. sformat("%02X",sbyte(bins,i)) ..(s==nil and "" or s)
-	end
-	hexs = string.upper(hexs)
-	return hexs
-end
-
---[[
-º¯ÊıÃû£ºhexstobins
-¹¦ÄÜ  £º16½øÖÆ×Ö·û´® ×ª»¯Îª ¶ş½øÖÆÊı¾İ¸ñÊ½£¬ÀıÈç"91688121364265f7" -> 91688121364265f7 £¨±íÊ¾µÚ1¸ö×Ö½ÚÊÇ0x91£¬µÚ2¸ö×Ö½ÚÎª0x68£¬......£©
-²ÎÊı  £º
-		hexs£º16½øÖÆ×Ö·û´®
-·µ»ØÖµ£º×ª»»ºóµÄÊı¾İ
-]]
-function hexstobins(hexs)
-	local tbins = {}
-	local num
-
-	if hexs == nil or type(hexs) ~= "string" then return nil,"nil input string" end
-
-	for i=1,slen(hexs),2 do
-		num = tonumber(ssub(hexs,i,i+1),16)
-		if num == nil then
-			return nil,"error num index:" .. i .. ssub(hexs,i,i+1)
-		end
-		tinsert(tbins,num)
-	end
-
-	return schar(unpack(tbins))
-end
-
---[[
-º¯ÊıÃû£ºucs2togb2312
-¹¦ÄÜ  £ºunicodeĞ¡¶Ë±àÂë ×ª»¯Îª gb2312±àÂë
-²ÎÊı  £º
-		ucs2s£ºunicodeĞ¡¶Ë±àÂëÊı¾İ
-·µ»ØÖµ£ºgb2312±àÂëÊı¾İ
-]]
-function ucs2togb2312(ucs2s)
-	local cd = iconv.open("gb2312","ucs2")
-	return cd:iconv(ucs2s)
-end
-
---[[
-º¯ÊıÃû£ºgb2312toucs2
-¹¦ÄÜ  £ºgb2312±àÂë ×ª»¯Îª unicodeĞ¡¶Ë±àÂë
-²ÎÊı  £º
-		gb2312s£ºgb2312±àÂëÊı¾İ
-·µ»ØÖµ£ºunicodeĞ¡¶Ë±àÂëÊı¾İ
-]]
-function gb2312toucs2(gb2312s)
-	local cd = iconv.open("ucs2","gb2312")
-	return cd:iconv(gb2312s)
-end
-
---[[
-º¯ÊıÃû£ºucs2betogb2312
-¹¦ÄÜ  £ºunicode´ó¶Ë±àÂë ×ª»¯Îª gb2312±àÂë
-²ÎÊı  £º
-		ucs2s£ºunicode´ó¶Ë±àÂëÊı¾İ
-·µ»ØÖµ£ºgb2312±àÂëÊı¾İ
-]]
-function ucs2betogb2312(ucs2s)
-	local cd = iconv.open("gb2312","ucs2be")
-	return cd:iconv(ucs2s)
-end
-
---[[
-º¯ÊıÃû£ºgb2312toucs2be
-¹¦ÄÜ  £ºgb2312±àÂë ×ª»¯Îª unicode´ó¶Ë±àÂë
-²ÎÊı  £º
-		gb2312s£ºgb2312±àÂëÊı¾İ
-·µ»ØÖµ£ºunicode´ó¶Ë±àÂëÊı¾İ
-]]
-function gb2312toucs2be(gb2312s)
-	local cd = iconv.open("ucs2be","gb2312")
-	return cd:iconv(gb2312s)
-end
-
---[[
-º¯ÊıÃû£ºucs2toutf8
-¹¦ÄÜ  £ºunicodeĞ¡¶Ë±àÂë ×ª»¯Îª utf8±àÂë
-²ÎÊı  £º
-		ucs2s£ºunicodeĞ¡¶Ë±àÂëÊı¾İ
-·µ»ØÖµ£ºutf8ÂëÊı¾İ
-]]
-function ucs2toutf8(ucs2s)
-	local cd = iconv.open("utf8","ucs2")
-	return cd:iconv(ucs2s)
-end
-
---[[
-º¯ÊıÃû£ºutf8toucs2
-¹¦ÄÜ  £ºutf8±àÂë ×ª»¯Îª unicodeĞ¡¶Ë±àÂë
-²ÎÊı  £º
-		utf8s£ºutf8±àÂëÊı¾İ
-·µ»ØÖµ£ºunicodeĞ¡¶Ë±àÂëÊı¾İ
-]]
-function utf8toucs2(utf8s)
-	local cd = iconv.open("ucs2","utf8")
-	return cd:iconv(utf8s)
-end
-
---[[
-º¯ÊıÃû£ºucs2betoutf8
-¹¦ÄÜ  £ºunicode´ó¶Ë±àÂë ×ª»¯Îª utf8±àÂë
-²ÎÊı  £º
-		ucs2s£ºunicode´ó¶Ë±àÂëÊı¾İ
-·µ»ØÖµ£ºutf8±àÂëÊı¾İ
-]]
-function ucs2betoutf8(ucs2s)
-	local cd = iconv.open("utf8","ucs2be")
-	return cd:iconv(ucs2s)
-end
-
---[[
-º¯ÊıÃû£ºutf8toucs2be
-¹¦ÄÜ  £ºutf8±àÂë ×ª»¯Îª unicode´ó¶Ë±àÂë
-²ÎÊı  £º
-		utf8s£ºutf8±àÂëÊı¾İ
-·µ»ØÖµ£ºunicode´ó¶Ë±àÂëÊı¾İ
-]]
-function utf8toucs2be(utf8s)
-	local cd = iconv.open("ucs2be","utf8")
-	return cd:iconv(utf8s)
-end
-
---[[
-º¯ÊıÃû£ºutf8togb2312
-¹¦ÄÜ  £ºutf8±àÂë ×ª»¯Îª gb2312±àÂë
-²ÎÊı  £º
-		utf8s£ºutf8±àÂëÊı¾İ
-·µ»ØÖµ£ºgb2312±àÂëÊı¾İ
-]]
-function utf8togb2312(utf8s)
-	local cd = iconv.open("ucs2","utf8")
-	local ucs2s = cd:iconv(utf8s)
-	cd = iconv.open("gb2312","ucs2")
-	return cd:iconv(ucs2s)
-end
-
---[[
-º¯ÊıÃû£ºgb2312toutf8
-¹¦ÄÜ  £ºgb2312±àÂë ×ª»¯Îª utf8±àÂë
-²ÎÊı  £º
-		gb2312s£ºgb2312±àÂëÊı¾İ
-·µ»ØÖµ£ºutf8±àÂëÊı¾İ
-]]
-function gb2312toutf8(gb2312s)
-	local cd = iconv.open("ucs2","gb2312")
-	local ucs2s = cd:iconv(gb2312s)
-	cd = iconv.open("utf8","ucs2")
-	return cd:iconv(ucs2s)
-end
-
-local function timeAddzone(y,m,d,hh,mm,ss,zone)
-
-	if not y or not m or not d or not hh or not mm or not ss then
-		return
-	end
-
-	hh = hh + zone
-	if hh >= 24 then
-		hh = hh - 24
-		d = d + 1
-		if m == 4 or m == 6 or m == 9 or m == 11 then
-			if d > 30 then
-				d = 1
-				m = m + 1
-			end
-			elseif m == 1 or m == 3 or m == 5 or m == 7 or m == 8 or m == 10 then
-			if d > 31 then
-				d = 1
-				m = m + 1
-			end
-			elseif m == 12 then
-			if d > 31 then
-				d = 1
-				m = 1
-				y = y + 1
-			end
-		elseif m == 2 then
-			if (((y+2000)%400) == 0) or (((y+2000)%4 == 0) and ((y+2000)%100 ~=0)) then
-				if d > 29 then
-					d = 1
-					m = 3
-				end
-			else
-				if d > 28 then
-					d = 1
-					m = 3
-				end
-			end
-		end
-	end
+--- BCDç¼–ç æ ¼å¼å­—ç¬¦ä¸² è½¬åŒ–ä¸º å·ç ASCIIå­—ç¬¦ä¸²(ä»…æ”¯æŒæ•°å­—)
+-- @string,numï¼šå¾…è½¬æ¢å­—ç¬¦ä¸²
+-- @return string data,è½¬æ¢åçš„å­—ç¬¦ä¸²
+-- @usage 
+-- local data = common.bcdNumToNum(common.fromHex("688121364265f7")) --è¡¨ç¤ºç¬¬1ä¸ªå­—èŠ‚æ˜¯0x68ï¼Œç¬¬2ä¸ªå­—èŠ‚ä¸º0x81ï¼Œ......
+-- data is "8618126324567"
+function bcdNumToNum(num)
+	local byte,v1,v2
 	local t = {}
-	t.year,t.month,t.day,t.hour,t.min,t.sec = y,m,d,hh,mm,ss
-	return t
-end
-local function timeRmozone(y,m,d,hh,mm,ss,zone)
-	if not y or not m or not d or not hh or not mm or not ss then
-		return
+
+	for i=1,num:len() do
+		byte = num:byte(i)
+		v1,v2 = bit.band(byte,0x0f),bit.band(bit.rshift(byte,4),0x0f)
+
+		if v1 == 0x0f then break end
+		table.insert(t,v1)
+
+		if v2 == 0x0f then break end
+		table.insert(t,v2)
 	end
-	hh = hh + zone
-	if hh < 0 then
-		hh = hh + 24
-		d = d - 1
-		if m == 2 or m == 4 or m == 6 or m == 8 or m == 9 or m == 11 then
-			if d < 1 then
-				d = 31
-				m = m -1
-			end
-		elseif m == 5 or m == 7  or m == 10 or m == 12 then
-			if d < 1 then
-				d = 30
-				m = m -1
-			end
-		elseif m == 1 then
-			if d < 1 then
-				d = 31
-				m = 12
-				y = y -1
-			end
-		elseif m == 3 then
-			if (((y+2000)%400) == 0) or (((y+2000)%4 == 0) and ((y+2000)%100 ~=0)) then
-				if d < 1 then
-					d = 29
-					m = 2
-				end
-			else
-				if d < 1 then
-					d = 28
-					m = 2
-				end
-			end
-		end
-	end
-	local t = {}
-	t.year,t.month,t.day,t.hour,t.min,t.sec = y,m,d,hh,mm,ss
-	return t
+
+	return table.concat(t)
 end
 
---[[
-º¯ÊıÃû£ºtransftimezone
-¹¦ÄÜ  £ºµ±Ç°Ê±ÇøµÄÊ±¼ä×ª»»ÎªĞÂÊ±ÇøµÄÊ±¼ä
-²ÎÊı  £º
-		y£ºµ±Ç°Ê±ÇøÄê·İ
-		m£ºµ±Ç°Ê±ÇøÔÂ·İ
-		d£ºµ±Ç°Ê±ÇøÌì
-		hh£ºµ±Ç°Ê±ÇøĞ¡Ê±
-		mm£ºµ±Ç°Ê±Çø·Ö
-		ss£ºµ±Ç°Ê±ÇøÃë
-		pretimezone£ºµ±Ç°Ê±Çø
-		nowtimezone£ºĞÂÊ±Çø
-·µ»ØÖµ£º·µ»ØĞÂÊ±Çø¶ÔÓ¦µÄÊ±¼ä£¬table¸ñÊ½{year,month.day,hour,min,sec}
-]]
-function transftimezone(y,m,d,hh,mm,ss,pretimezone,nowtimezone)
-	local t = {}
-	local zone = nil
-	zone = nowtimezone - pretimezone
-
-	if zone >= 0 and zone < 23 then
-		t = timeAddzone(y,m,d,hh,mm,ss,zone)
-	elseif zone < 0 and zone >= -24 then
-		t = timeRmozone(y,m,d,hh,mm,ss,zone)
-	end
-	return t
+--- unicodeå°ç«¯ç¼–ç  è½¬åŒ–ä¸º gb2312ç¼–ç 
+-- @string ucs2s,unicodeå°ç«¯ç¼–ç æ•°æ®
+-- @return string data,gb2312ç¼–ç æ•°æ®
+-- @usage local data = common.ucs2ToGb2312(ucs2s)
+function ucs2ToGb2312(ucs2s)
+    local cd = iconv.open("gb2312", "ucs2")
+    return cd:iconv(ucs2s)
 end
 
+--- gb2312ç¼–ç  è½¬åŒ–ä¸º unicodeå°ç«¯ç¼–ç 
+-- @string gb2312s,gb2312ç¼–ç æ•°æ®
+-- @return string data,unicodeå°ç«¯ç¼–ç æ•°æ®
+-- @usage local data = common.gb2312ToUcs2(gb2312s)
+function gb2312ToUcs2(gb2312s)
+    local cd = iconv.open("ucs2", "gb2312")
+    return cd:iconv(gb2312s)
+end
+
+--- unicodeå¤§ç«¯ç¼–ç  è½¬åŒ–ä¸º gb2312ç¼–ç 
+-- @string ucs2s,unicodeå¤§ç«¯ç¼–ç æ•°æ®
+-- @return string data,gb2312ç¼–ç æ•°æ®
+-- @usage data = common.ucs2beToGb2312(ucs2s)
+function ucs2beToGb2312(ucs2s)
+    local cd = iconv.open("gb2312", "ucs2be")
+    return cd:iconv(ucs2s)
+end
+
+--- gb2312ç¼–ç  è½¬åŒ–ä¸º unicodeå¤§ç«¯ç¼–ç 
+-- @string gb2312s,gb2312ç¼–ç æ•°æ®
+-- @return string data,unicodeå¤§ç«¯ç¼–ç æ•°æ®
+-- @usage local data = common.gb2312ToUcs2be(gb2312s)
+function gb2312ToUcs2be(gb2312s)
+    local cd = iconv.open("ucs2be", "gb2312")
+    return cd:iconv(gb2312s)
+end
+
+--- unicodeå°ç«¯ç¼–ç  è½¬åŒ–ä¸º utf8ç¼–ç 
+-- @string ucs2s,unicodeå°ç«¯ç¼–ç æ•°æ®
+-- @return string data,utf8ç¼–ç æ•°æ®
+-- @usage data = common.ucs2ToUtf8(ucs2s)
+function ucs2ToUtf8(ucs2s)
+    local cd = iconv.open("utf8", "ucs2")
+    return cd:iconv(ucs2s)
+end
+
+--- utf8ç¼–ç  è½¬åŒ–ä¸º unicodeå°ç«¯ç¼–ç 
+-- @string utf8s,utf8ç¼–ç æ•°æ®
+-- @return string data,unicodeå°ç«¯ç¼–ç æ•°æ®
+-- @usage local data = common.utf8ToUcs2(utf8s)
+function utf8ToUcs2(utf8s)
+    local cd = iconv.open("ucs2", "utf8")
+    return cd:iconv(utf8s)
+end
+
+--- unicodeå¤§ç«¯ç¼–ç  è½¬åŒ–ä¸º utf8ç¼–ç 
+-- @string ucs2s,unicodeå¤§ç«¯ç¼–ç æ•°æ®
+-- @return string data,utf8ç¼–ç æ•°æ®
+-- @usage data = common.ucs2beToUtf8(ucs2s)
+function ucs2beToUtf8(ucs2s)
+    local cd = iconv.open("utf8", "ucs2be")
+    return cd:iconv(ucs2s)
+end
+
+--- utf8ç¼–ç  è½¬åŒ–ä¸º unicodeå¤§ç«¯ç¼–ç 
+-- @string utf8s,utf8ç¼–ç æ•°æ®
+-- @return string data,unicodeå¤§ç«¯ç¼–ç æ•°æ®
+-- @usage local data = common.utf8ToUcs2be(utf8s)
+function utf8ToUcs2be(utf8s)
+    local cd = iconv.open("ucs2be", "utf8")
+    return cd:iconv(utf8s)
+end
+
+--- utf8ç¼–ç  è½¬åŒ–ä¸º gb2312ç¼–ç 
+-- @string utf8s,utf8ç¼–ç æ•°æ®
+-- @return string data,gb2312ç¼–ç æ•°æ®
+-- @usage local data = common.utf8ToGb2312(utf8s)
+function utf8ToGb2312(utf8s)
+    local cd = iconv.open("ucs2", "utf8")
+    local ucs2s = cd:iconv(utf8s)
+    cd = iconv.open("gb2312", "ucs2")
+    return cd:iconv(ucs2s)
+end
+
+--- gb2312ç¼–ç  è½¬åŒ–ä¸º utf8ç¼–ç 
+-- @string gb2312s,gb2312ç¼–ç æ•°æ®
+-- @return string data,utf8ç¼–ç æ•°æ®
+-- @usage local data = common.gb2312ToUtf8(gb2312s)
+function gb2312ToUtf8(gb2312s)
+    local cd = iconv.open("ucs2", "gb2312")
+    local ucs2s = cd:iconv(gb2312s)
+    cd = iconv.open("utf8", "ucs2")
+    return cd:iconv(ucs2s)
+end
+
+local function timeAddzone(y, m, d, hh, mm, ss, zone)
+    if not y or not m or not d or not hh or not mm or not ss then
+        return
+    end
+    hh = hh + zone
+    if hh >= 24 then
+        hh = hh - 24
+        d = d + 1
+        if m == 4 or m == 6 or m == 9 or m == 11 then
+            if d > 30 then
+                d = 1
+                m = m + 1
+            end
+        elseif m == 1 or m == 3 or m == 5 or m == 7 or m == 8 or m == 10 then
+            if d > 31 then
+                d = 1
+                m = m + 1
+            end
+        elseif m == 12 then
+            if d > 31 then
+                d = 1
+                m = 1
+                y = y + 1
+            end
+        elseif m == 2 then
+            if (((y + 2000) % 400) == 0) or (((y + 2000) % 4 == 0) and ((y + 2000) % 100 ~= 0)) then
+                if d > 29 then
+                    d = 1
+                    m = 3
+                end
+            else
+                if d > 28 then
+                    d = 1
+                    m = 3
+                end
+            end
+        end
+    end
+    local t = {}
+    t.year, t.month, t.day, t.hour, t.min, t.sec = y, m, d, hh, mm, ss
+    return t
+end
+local function timeSubZone(y, m, d, hh, mm, ss, zone)
+    if not y or not m or not d or not hh or not mm or not ss then
+        return
+    end
+    hh = hh + zone
+    if hh < 0 then
+        hh = hh + 24
+        d = d - 1
+        if m == 2 or m == 4 or m == 6 or m == 8 or m == 9 or m == 11 then
+            if d < 1 then
+                d = 31
+                m = m - 1
+            end
+        elseif m == 5 or m == 7 or m == 10 or m == 12 then
+            if d < 1 then
+                d = 30
+                m = m - 1
+            end
+        elseif m == 1 then
+            if d < 1 then
+                d = 31
+                m = 12
+                y = y - 1
+            end
+        elseif m == 3 then
+            if (((y + 2000) % 400) == 0) or (((y + 2000) % 4 == 0) and ((y + 2000) % 100 ~= 0)) then
+                if d < 1 then
+                    d = 29
+                    m = 2
+                end
+            else
+                if d < 1 then
+                    d = 28
+                    m = 2
+                end
+            end
+        end
+    end
+    local t = {}
+    t.year, t.month, t.day, t.hour, t.min, t.sec = y, m, d, hh, mm, ss
+    return t
+end
+
+--- æ—¶åŒºæ—¶é—´è½¬æ¢
+-- @number y,æºæ—¶åŒºå¹´ä»½
+-- @number m,æºæ—¶åŒºæœˆä»½
+-- @number d,æºæ—¶åŒºå¤©
+-- @number hh,æºæ—¶åŒºå°æ—¶
+-- @number mm,æºæ—¶åŒºåˆ†
+-- @number ss,æºæ—¶åŒºç§’
+-- @number srcTimeZone,æºæ—¶åŒº
+-- @number dstTimeZone,ç›®çš„æ—¶åŒº
+-- @return table dstZoneTime,è¿”å›ç›®çš„æ—¶åŒºå¯¹åº”çš„æ—¶é—´ï¼Œ{year,month,day,hour,min,sec}
+-- @usage
+-- local dstZoneTime = common.timeZoneConvert(2018,1,1,18,00,00,0,8)
+-- dstZoneTimeä¸º{year=2018,month=1,day=2,hour=2,min=0,sec=0}
+function timeZoneConvert(y, m, d, hh, mm, ss, srcTimeZone, dstTimeZone)
+    local t = {}
+    local zone = dstTimeZone-srcTimeZone
+    
+    if zone >= 0 and zone < 23 then
+        t = timeAddzone(y, m, d, hh, mm, ss, zone)
+    elseif zone < 0 and zone >= -24 then
+        t = timeSubZone(y, m, d, hh, mm, ss, zone)
+    end
+    return t
+end

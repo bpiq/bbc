@@ -1,75 +1,98 @@
---[[
-Ä£¿éÃû³Æ£ºLua×Ô´ø½Ó¿Ú²¹¶¡
-Ä£¿é¹¦ÄÜ£º²¹¶¡Ä³Ğ©Lua×Ô´øµÄ½Ó¿Ú£¬¹æ±Üµ÷ÓÃÒì³£Ê±ËÀ»ú
-Ä£¿é×îºóĞŞ¸ÄÊ±¼ä£º2017.02.14
-]]
+--- æ¨¡å—åŠŸèƒ½ï¼šLuaè¡¥ä¸
+-- @module patch
+-- @author openLuat
+-- @license MIT
+-- @copyright openLuat
+-- @release 2017.10.21
 
---±£´æLua×Ô´øµÄos.time½Ó¿Ú
+module(..., package.seeall)
+
+--[[
+æ¨¡å—åç§°ï¼šLuaè‡ªå¸¦æ¥å£è¡¥ä¸
+æ¨¡å—åŠŸèƒ½ï¼šè¡¥ä¸æŸäº›Luaè‡ªå¸¦çš„æ¥å£ï¼Œè§„é¿è°ƒç”¨å¼‚å¸¸æ—¶æ­»æœº
+æ¨¡å—æœ€åä¿®æ”¹æ—¶é—´ï¼š2017.02.14
+]]
+--ä¿å­˜Luaè‡ªå¸¦çš„os.timeæ¥å£
 local oldostime = os.time
 
 --[[
-º¯ÊıÃû£ºsafeostime
-¹¦ÄÜ  £º·â×°×Ô¶¨ÒåµÄos.time½Ó¿Ú
-²ÎÊı  £º
-		t£ºÈÕÆÚ±í£¬Èç¹ûÃ»ÓĞ´«Èë£¬Ê¹ÓÃÏµÍ³µ±Ç°Ê±¼ä
-·µ»ØÖµ£ºtÊ±¼ä¾àÀë1970Äê1ÔÂ1ÈÕ0Ê±0·Ö0ÃëËù¾­¹ıµÄÃëÊı
+å‡½æ•°åï¼šsafeostime
+åŠŸèƒ½  ï¼šå°è£…è‡ªå®šä¹‰çš„os.timeæ¥å£
+å‚æ•°  ï¼š
+tï¼šæ—¥æœŸè¡¨ï¼Œå¦‚æœæ²¡æœ‰ä¼ å…¥ï¼Œä½¿ç”¨ç³»ç»Ÿå½“å‰æ—¶é—´
+è¿”å›å€¼ï¼štæ—¶é—´è·ç¦»1970å¹´1æœˆ1æ—¥0æ—¶0åˆ†0ç§’æ‰€ç»è¿‡çš„ç§’æ•°
 ]]
 function safeostime(t)
-	return oldostime(t) or 0
+    return oldostime(t) or 0
 end
 
---Lua×Ô´øµÄos.time½Ó¿ÚÖ¸Ïò×Ô¶¨ÒåµÄsafeostime½Ó¿Ú
+--Luaè‡ªå¸¦çš„os.timeæ¥å£æŒ‡å‘è‡ªå®šä¹‰çš„safeostimeæ¥å£
 os.time = safeostime
 
---±£´æLua×Ô´øµÄos.date½Ó¿Ú
+--ä¿å­˜Luaè‡ªå¸¦çš„os.dateæ¥å£
 local oldosdate = os.date
 
 --[[
-º¯ÊıÃû£ºsafeosdate
-¹¦ÄÜ  £º·â×°×Ô¶¨ÒåµÄos.date½Ó¿Ú
-²ÎÊı  £º
-		s£ºÊä³ö¸ñÊ½
-		t£º¾àÀë1970Äê1ÔÂ1ÈÕ0Ê±0·Ö0ÃëËù¾­¹ıµÄÃëÊı
-·µ»ØÖµ£º²Î¿¼Lua×Ô´øµÄos.date½Ó¿ÚËµÃ÷
+å‡½æ•°åï¼šsafeosdate
+åŠŸèƒ½  ï¼šå°è£…è‡ªå®šä¹‰çš„os.dateæ¥å£
+å‚æ•°  ï¼š
+sï¼šè¾“å‡ºæ ¼å¼
+tï¼šè·ç¦»1970å¹´1æœˆ1æ—¥0æ—¶0åˆ†0ç§’æ‰€ç»è¿‡çš„ç§’æ•°
+è¿”å›å€¼ï¼šå‚è€ƒLuaè‡ªå¸¦çš„os.dateæ¥å£è¯´æ˜
 ]]
-function safeosdate(s,t)
+function safeosdate(s, t)
     if s == "*t" then
-        return oldosdate(s,t) or {year = 2012,
-                month = 12,
-                day = 11,
-                hour = 10,
-                min = 9,
-                sec = 0}
+        return oldosdate(s, t) or {year = 2012,
+            month = 12,
+            day = 11,
+            hour = 10,
+            min = 9,
+            sec = 0}
     else
-        return oldosdate(s,t)
+        return oldosdate(s, t)
     end
 end
 
---Lua×Ô´øµÄos.date½Ó¿ÚÖ¸Ïò×Ô¶¨ÒåµÄsafeosdate½Ó¿Ú
+--Luaè‡ªå¸¦çš„os.dateæ¥å£æŒ‡å‘è‡ªå®šä¹‰çš„safeosdateæ¥å£
 os.date = safeosdate
 
---±£´æLua×Ô´øµÄjson.decode½Ó¿Ú
-if json and json.decode then oldjsondecode = json.decode end
-
---[[
-º¯ÊıÃû£ºsafejsondecode
-¹¦ÄÜ  £º·â×°×Ô¶¨ÒåµÄjson.decode½Ó¿Ú
-²ÎÊı  £º
-		s£ºjson¸ñÊ½µÄ×Ö·û´®
-·µ»ØÖµ£º
-		µÚÒ»¸ö·µ»ØÖµÎª½âÎöjson×Ö·û´®ºóµÄtable
-		µÚ¶ş¸ö·µ»ØÖµÎª½âÎö½á¹û(true±íÊ¾³É¹¦£¬falseÊ§°Ü)
-		µÚÈı¸ö·µ»ØÖµ¿ÉÑ¡£¨Ö»ÓĞµÚ¶ş¸ö·µ»ØÖµÎªfalseÊ±£¬²ÅÓĞÒâÒå£©£¬±íÊ¾³ö´íĞÅÏ¢
-]]
-function safejsondecode(s)
-	local result,info = pcall(oldjsondecode,s)
-	if result then
-		return info,true
-	else
-		return {},false,info
-	end
+-- å¯¹coroutine.resumeåŠ ä¸€ä¸ªä¿®é¥°å™¨ç”¨äºæ•è·åç¨‹é”™è¯¯
+local rawcoresume = coroutine.resume
+coroutine.resume = function(...)
+    function wrapper(co,...)
+        if not arg[1] then
+            local traceBack = debug.traceback(co)
+            traceBack = (traceBack and traceBack~="") and (arg[2].."\r\n"..traceBack) or arg[2]
+            if errDump and errDump.appendErr and type(errDump.appendErr)=="function" then
+                errDump.appendErr(traceBack)                
+            else
+                log.error("coroutine.resume",traceBack)
+            end
+            if _G.COROUTINE_ERROR_RESTART then rtos.restart() end
+        end
+        return unpack(arg)
+    end
+    return wrapper(arg[1],rawcoresume(unpack(arg)))
 end
 
---Lua×Ô´øµÄjson.decode½Ó¿ÚÖ¸Ïò×Ô¶¨ÒåµÄsafejsondecode½Ó¿Ú
-if json and json.decode then json.decode = safejsondecode end
+os.clockms = function() return rtos.tick()/16 end
 
+--ä¿å­˜Luaè‡ªå¸¦çš„json.decodeæ¥å£
+if json and json.decode then oldjsondecode = json.decode end
+
+--- å°è£…è‡ªå®šä¹‰çš„json.decodeæ¥å£
+-- @string s,jsonæ ¼å¼çš„å­—ç¬¦ä¸²
+-- @return table,ç¬¬ä¸€ä¸ªè¿”å›å€¼ä¸ºè§£æjsonå­—ç¬¦ä¸²åçš„table
+-- @return boole,ç¬¬äºŒä¸ªè¿”å›å€¼ä¸ºè§£æç»“æœ(trueè¡¨ç¤ºæˆåŠŸï¼Œfalseå¤±è´¥)
+-- @return string,ç¬¬ä¸‰ä¸ªè¿”å›å€¼å¯é€‰ï¼ˆåªæœ‰ç¬¬äºŒä¸ªè¿”å›å€¼ä¸ºfalseæ—¶ï¼Œæ‰æœ‰æ„ä¹‰ï¼‰ï¼Œè¡¨ç¤ºå‡ºé”™ä¿¡æ¯
+local function safeJsonDecode(s)
+    local result, info = pcall(oldjsondecode, s)
+    if result then
+        return info, true
+    else
+        return {}, false, info
+    end
+end
+
+--Luaè‡ªå¸¦çš„json.decodeæ¥å£æŒ‡å‘è‡ªå®šä¹‰çš„safeJsonDecodeæ¥å£
+if json and json.decode then json.decode = safeJsonDecode end

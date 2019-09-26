@@ -1,17 +1,15 @@
---[[
-Ä£¿éÃû³Æ£ºUI´°¿Ú¹ÜÀí
-Ä£¿é¹¦ÄÜ£º´°¿ÚµÄĞÂÔö¡¢É¾³ı¡¢Ë¢ĞÂµÈ
-Ä£¿é×îºóĞŞ¸ÄÊ±¼ä£º2017.07.26
-]]
-local base = _G
-local sys = require"sys"
-local table = require"table"
-local print,assert,type,ipairs = base.print,base.assert,base.type,base.ipairs
-module(...)
+--- æ¨¡å—åŠŸèƒ½ï¼šUIçª—å£ç®¡ç†
+-- @module uiWin
+-- @author openLuat
+-- @license MIT
+-- @copyright openLuat
+-- @release 2018.03.25
 
---´°¿Ú¹ÜÀíÕ»
+module(...,package.seeall)
+
+--çª—å£ç®¡ç†æ ˆ
 local stack = {}
---µ±Ç°·ÖÅäµÄ´°¿ÚID
+--å½“å‰åˆ†é…çš„çª—å£ID
 local winid = 0
 
 local function allocid()
@@ -19,83 +17,100 @@ local function allocid()
 	return winid
 end
 
-local function losefocus()
-	if stack[#stack] and stack[#stack]["onlosefocus"] then
-		stack[#stack]["onlosefocus"]()
+local function loseFocus()
+	if stack[#stack] and stack[#stack]["onLoseFocus"] then
+		stack[#stack]["onLoseFocus"]()
 	end	
 end
 
---[[
-º¯ÊıÃû£ºadd
-¹¦ÄÜ  £ºĞÂÔöÒ»¸ö´°¿Ú
-²ÎÊı  £º
-		wnd£º´°¿ÚµÄÔªËØÒÔ¼°ÏûÏ¢´¦Àíº¯Êı±í
-·µ»ØÖµ£º´°¿ÚID
-]]
+--- æ–°å¢ä¸€ä¸ªçª—å£
+-- @table wndï¼Œçª—å£çš„å…ƒç´ ä»¥åŠæ¶ˆæ¯å¤„ç†å‡½æ•°è¡¨
+-- @return numberï¼Œçª—å£ID
+-- @usage uiWin.add({onUpdate = refresh})
 function add(wnd)
-	---±ØĞë×¢²á¸üĞÂ½Ó¿Ú
-	assert(wnd.onupdate)
+	---å¿…é¡»æ³¨å†Œæ›´æ–°æ¥å£
+	assert(wnd.onUpdate)
 	if type(wnd) ~= "table" then
 		assert("unknown uiwin type "..type(wnd))
 	end
-	--ÉÏÒ»¸ö´°¿ÚÖ´ĞĞÊ§È¥½¹µãµÄ´¦Àíº¯Êı
-	losefocus()
-	--ÎªĞÂ´°¿Ú·ÖÅä´°¿ÚID
+	--ä¸Šä¸€ä¸ªçª—å£æ‰§è¡Œå¤±å»ç„¦ç‚¹çš„å¤„ç†å‡½æ•°
+	loseFocus()
+	--ä¸ºæ–°çª—å£åˆ†é…çª—å£ID
 	wnd.id = allocid()
-	--ĞÂ´°¿ÚÇëÇóÈëÕ»
-	sys.dispatch("UIWND_ADD",wnd)
+	--æ–°çª—å£è¯·æ±‚å…¥æ ˆ
+	sys.publish("UIWND_ADD",wnd)
 	return wnd.id
 end
 
---[[
-º¯ÊıÃû£ºremove
-¹¦ÄÜ  £ºÒÆ³ıÒ»¸ö´°¿Ú
-²ÎÊı  £º
-		winid£º´°¿ÚID
-·µ»ØÖµ£ºÎŞ
-]]
-function remove(winid)
-	sys.dispatch("UIWND_REMOVE",winid)
+--- ç§»é™¤ä¸€ä¸ªçª—å£
+-- @number winIdï¼Œçª—å£ID
+-- @return nil
+-- @usage uiWin.remove(winId)
+function remove(winId)
+	sys.publish("UIWND_REMOVE",winId)
 end
 
-local function onadd(wnd)
+function removeAll()
+    sys.publish("UIWND_REMOVEALL")
+end
+
+function update()
+    sys.publish("UIWND_UPDATE")
+end
+
+local function onAdd(wnd)
 	table.insert(stack,wnd)
-	stack[#stack].onupdate()
+	stack[#stack].onUpdate()
 end
 
-local function onremove(winid)
+local function onRemove(winid)
 	local istop,k,v
 	for k,v in ipairs(stack) do
 		if v.id == winid then
 			istop = (k==#stack)
 			table.remove(stack,k)
 			if #stack~=0 and istop then
-				stack[#stack].onupdate()
+				stack[#stack].onUpdate()
 			end
 			return
 		end
 	end
 end
 
-local function onupdate()
-	stack[#stack].onupdate()
+local function onRemoveAll()
+	local k,v
+	for k,v in ipairs(stack) do
+		table.remove(stack,k)
+	end
 end
 
---[[
-º¯ÊıÃû£ºisactive
-¹¦ÄÜ  £ºÅĞ¶ÏÒ»¸ö´°¿ÚÊÇ·ñ´¦ÓÚ×îÇ°ÏÔÊ¾
-²ÎÊı  £º
-		winid£º´°¿ÚID
-·µ»ØÖµ£ºtrue±íÊ¾×îÇ°ÏÔÊ¾£¬ÆäÓà±íÊ¾·Ç×îÇ°ÏÔÊ¾
-]]
-function isactive(winid)
-	return stack[#stack].id==winid
+local function onUpdate()
+    if stack[#stack] and stack[#stack].onUpdate then
+        stack[#stack].onUpdate()
+    end
 end
 
- sys.regapp({
- 	UIWND_ADD = onadd,
- 	UIWND_REMOVE = onremove,
- 	UIWND_UPDATE = onupdate,
- 	UIWND_TOUCH = onTouch,
- 	UIWND_KEY = onKey,
- })
+--keyï¼šè‡ªå®šä¹‰åŠŸèƒ½é”®
+--valueï¼šè‡ªå®šä¹‰åŠŸèƒ½é”®çš„çŠ¶æ€
+local function onKey(key,value)
+    if stack[#stack] and stack[#stack].onKey then
+        stack[#stack].onKey(key,value)
+    end
+end
+
+--- åˆ¤æ–­ä¸€ä¸ªçª—å£æ˜¯å¦å¤„äºæœ€å‰æ˜¾ç¤º
+-- @number winIdï¼Œçª—å£ID
+-- @return boolï¼Œtrueè¡¨ç¤ºæœ€å‰æ˜¾ç¤ºï¼Œå…¶ä½™è¡¨ç¤ºéæœ€å‰æ˜¾ç¤º
+-- @usage uiWin.isActive(winId)
+function isActive(winId)
+    if stack[#stack] and stack[#stack].id then
+        return stack[#stack].id==winId
+    end	
+end
+
+sys.subscribe("UIWND_ADD",onAdd)
+sys.subscribe("UIWND_REMOVE",onRemove)
+sys.subscribe("UIWND_REMOVEALL",onRemoveAll)
+sys.subscribe("UIWND_UPDATE",onUpdate)
+sys.subscribe("UIWND_TOUCH",onTouch)
+sys.subscribe("UIWND_KEY",onKey)

@@ -1,645 +1,297 @@
-module(...,package.seeall)
-
-require"common"
+--- æ¨¡å—åŠŸèƒ½ï¼šHTTPå®¢æˆ·ç«¯
+-- @module http
+-- @author openLuat
+-- @license MIT
+-- @copyright openLuat
+-- @release 2017.10.23
 require"socket"
 require"utils"
-local lpack=require"pack"
+module(..., package.seeall)
 
-local sfind,slen,ssub,smatch,sgmatch= string.find,string.len,string.sub,string.match,string.gmatch
-local PACKET_LEN = 1460
---[[
-º¯ÊıÃû£ºprint
-¹¦ÄÜ  £º´òÓ¡½Ó¿Ú£¬´ËÎÄ¼şÖĞµÄËùÓĞ´òÓ¡¶¼»á¼ÓÉÏtestÇ°×º
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-local function print(...)
-	_G.print("http",...)
+local function response(client,cbFnc,result,prompt,head,body)
+    if not result then log.error("http.response",result,prompt) end
+    if cbFnc then cbFnc(result,prompt,head,body) end
+    if client then client:close() end
 end
 
---http clients´æ´¢±í
-local tclients = {}
-
---[[
-º¯ÊıÃû£ºgetclient
-¹¦ÄÜ  £º·µ»ØÒ»¸öhttp clientÔÚtclientsÖĞµÄË÷Òı
-²ÎÊı  £º
-        sckidx£ºhttp client¶ÔÓ¦µÄsocketË÷Òı
-·µ»ØÖµ£ºsckidx¶ÔÓ¦µÄhttp clientÔÚtclientsÖĞµÄË÷Òı
-]]
-local function getclient(sckidx)
-	for k,v in pairs(tclients) do
-		if v.sckidx==sckidx then return k end
-	end
-end
-
---[[
-º¯ÊıÃû£ºdatinactive
-¹¦ÄÜ  £ºÊı¾İÍ¨ĞÅÒì³£´¦Àí
-²ÎÊı  £º
-		sckidx£ºsocket idx
-·µ»ØÖµ£ºÎŞ
-]]
-local function datinactive(sckidx)
-    sys.restart("SVRNODATA")
-end
-
---[[
-º¯ÊıÃû£ºsnd
-¹¦ÄÜ  £ºµ÷ÓÃ·¢ËÍ½Ó¿Ú·¢ËÍÊı¾İ
-²ÎÊı  £º
-		sckidx£ºsocket idx
-        data£º·¢ËÍµÄÊı¾İ£¬ÔÚ·¢ËÍ½á¹ûÊÂ¼ş´¦Àíº¯ÊıntfyÖĞ£¬»á¸³Öµµ½item.dataÖĞ
-		para£º·¢ËÍµÄ²ÎÊı£¬ÔÚ·¢ËÍ½á¹ûÊÂ¼ş´¦Àíº¯ÊıntfyÖĞ£¬»á¸³Öµµ½item.paraÖĞ 
-·µ»ØÖµ£ºµ÷ÓÃ·¢ËÍ½Ó¿ÚµÄ½á¹û£¨²¢²»ÊÇÊı¾İ·¢ËÍÊÇ·ñ³É¹¦µÄ½á¹û£¬Êı¾İ·¢ËÍÊÇ·ñ³É¹¦µÄ½á¹ûÔÚntfyÖĞµÄSENDÊÂ¼şÖĞÍ¨Öª£©£¬trueÎª³É¹¦£¬ÆäËûÎªÊ§°Ü
-]]
-function snd(sckidx,data,para)
-    return socket.send(sckidx,data,para)
-end
-
-local RECONN_MAX_CNT,RECONN_PERIOD,RECONN_CYCLE_MAX_CNT,RECONN_CYCLE_PERIOD = 3,5,3,20
-
---[[
-º¯ÊıÃû£ºreconn
-¹¦ÄÜ  £ºsocketÖØÁ¬ºóÌ¨´¦Àí
-        Ò»¸öÁ¬½ÓÖÜÆÚÄÚµÄ¶¯×÷£ºÈç¹ûÁ¬½ÓºóÌ¨Ê§°Ü£¬»á³¢ÊÔÖØÁ¬£¬ÖØÁ¬¼ä¸ôÎªRECONN_PERIODÃë£¬×î¶àÖØÁ¬RECONN_MAX_CNT´Î
-        Èç¹ûÒ»¸öÁ¬½ÓÖÜÆÚÄÚ¶¼Ã»ÓĞÁ¬½Ó³É¹¦£¬ÔòµÈ´ıRECONN_CYCLE_PERIODÃëºó£¬ÖØĞÂ·¢ÆğÒ»¸öÁ¬½ÓÖÜÆÚ
-        Èç¹ûÁ¬ĞøRECONN_CYCLE_MAX_CNT´ÎµÄÁ¬½ÓÖÜÆÚ¶¼Ã»ÓĞÁ¬½Ó³É¹¦£¬ÔòÖØÆôÈí¼ş
-²ÎÊı  £º
-		sckidx£ºsocket idx
-·µ»ØÖµ£ºÎŞ
-]]
-function reconn(sckidx)
-	local hidx = getclient(sckidx)
-	print("reconn",tclients[hidx].sckreconncnt,tclients[hidx].sckconning,tclients[hidx].sckreconncyclecnt)
-	--sckconning±íÊ¾ÕıÔÚ³¢ÊÔÁ¬½ÓºóÌ¨£¬Ò»¶¨ÒªÅĞ¶Ï´Ë±äÁ¿£¬·ñÔòÓĞ¿ÉÄÜ·¢Æğ²»±ØÒªµÄÖØÁ¬£¬µ¼ÖÂsckreconncntÔö¼Ó£¬Êµ¼ÊµÄÖØÁ¬´ÎÊı¼õÉÙ
-	if tclients[hidx].sckconning then return end
-	--Ò»¸öÁ¬½ÓÖÜÆÚÄÚµÄÖØÁ¬
-	if tclients[hidx].sckreconncnt < RECONN_MAX_CNT then		
-		tclients[hidx].sckreconncnt = tclients[hidx].sckreconncnt+1
-		socket.disconnect(sckidx,"RECONN")
-		tclients[hidx].sckconning = true
-	--Ò»¸öÁ¬½ÓÖÜÆÚµÄÖØÁ¬¶¼Ê§°Ü
-	else
-		tclients[hidx].sckreconncnt,tclients[hidx].sckreconncyclecnt = 0,tclients[hidx].sckreconncyclecnt+1
-		if tclients[hidx].sckreconncyclecnt >= RECONN_CYCLE_MAX_CNT or not tclients[hidx].mode then
-			if tclients[hidx].sckerrcb then
-				tclients[hidx].sckreconncnt=0
-				tclients[hidx].sckreconncyclecnt=0
-				tclients[hidx].sckerrcb("CONNECT")
-			else
-				sys.restart("connect fail")
-			end
-		else
-			link.shut()
-		end		
-	end
-end
-
-local function connectitem(hidx)
-	local item = tclients[hidx]
-	connect(item.sckidx,item.prot,item.host,item.port)
-end
-
---[[
-º¯ÊıÃû£ºgetnxtsnd
-¹¦ÄÜ  £º»ñÈ¡ÏÂ´Î·¢ËÍµÄÊı¾İĞÅÏ¢
-²ÎÊı  £º
-        hidx£ºnumberÀàĞÍ£¬http client idx
-        sndidx£ºnumberÀàĞÍ£¬µ±Ç°ÒÑ¾­·¢ËÍ³É¹¦µÄÊı¾İË÷Òı£¬´Ó0¿ªÊ¼£¬0±íÊ¾Í·£¬ÆäÓàÊıÖµ±íÊ¾body
-		sndpos£ºnumberÀàĞÍ£¬µ±Ç°ÒÑ¾­·¢ËÍ³É¹¦µÄÊı¾İË÷Òı¶ÔÓ¦µÄÊı¾İÄÚÈİµÄÎ»ÖÃ
-·µ»ØÖµ£º
-		Èç¹ûÈÔÓĞÊı¾İĞèÒª·¢ËÍ£¬·µ»Ø½«Òª·¢ËÍµÄÊı¾İÄÚÈİ£¬½«Òª·¢ËÍµÄÊı¾İË÷Òı£¬½«Òª·¢ËÍµÄÊı¾İË÷Òı¶ÔÓ¦µÄÊı¾İÄÚÈİµÄÎ»ÖÃ
-		Èç¹ûÃ»ÓĞÊı¾İĞèÒª·¢ËÍ£¬·µ»Ø""
-]]
-local function getnxtsnd(hidx,sndidx,sndpos)
-	local item,idx = tclients[hidx]
-	
-	if type(item.body[sndidx])=="string" then
-		if sndpos>=slen(item.body[sndidx]) then
-			idx = sndidx+1
-		else
-			return ssub(item.body[sndidx],sndpos+1,sndpos+PACKET_LEN),sndidx,sndpos+PACKET_LEN
-		end
-	elseif type(item.body[sndidx])=="table" then
-		if sndpos>=item.body[sndidx].len then
-			idx = sndidx+1
-		else
-			if item.body[sndidx].file_base64 then
-				local mdat=io.filedata(item.body[sndidx].file_base64,sndpos/4*3,PACKET_LEN/4*3)
-				mdat=crypto.base64_encode(mdat,#mdat)
-				return mdat,sndidx,sndpos+PACKET_LEN
-			end
-			return io.filedata(item.body[sndidx].file,sndpos,PACKET_LEN),sndidx,sndpos+PACKET_LEN
-		end
-	end
-	
-	if type(item.body[idx])=="string" then
-		return ssub(item.body[idx],1,PACKET_LEN),idx,PACKET_LEN		
-	elseif type(item.body[idx])=="table" then
-		if item.body[idx].file_base64 then
-			local mdat=io.filedata(item.body[idx].file_base64,0,PACKET_LEN/4*3)
-			mdat=crypto.base64_encode(mdat,#mdat)
-			return mdat,idx,PACKET_LEN
-		end
-		return io.filedata(item.body[idx].file,0,PACKET_LEN),idx,PACKET_LEN
-	end
-	
-	return ""
-end
-
---[[
-º¯ÊıÃû£ºntfy
-¹¦ÄÜ  £ºsocket×´Ì¬µÄ´¦Àíº¯Êı
-²ÎÊı  £º
-        idx£ºnumberÀàĞÍ£¬socketÖĞÎ¬»¤µÄsocket idx£¬¸úµ÷ÓÃsocket.connectÊ±´«ÈëµÄµÚÒ»¸ö²ÎÊıÏàÍ¬£¬³ÌĞò¿ÉÒÔºöÂÔ²»´¦Àí
-        evt£ºstringÀàĞÍ£¬ÏûÏ¢ÊÂ¼şÀàĞÍ
-		result£º boolÀàĞÍ£¬ÏûÏ¢ÊÂ¼ş½á¹û£¬trueÎª³É¹¦£¬ÆäËûÎªÊ§°Ü
-		item£ºtableÀàĞÍ£¬{data=,para=}£¬ÏûÏ¢»Ø´«µÄ²ÎÊıºÍÊı¾İ£¬Ä¿Ç°Ö»ÊÇÔÚSENDÀàĞÍµÄÊÂ¼şÖĞÓÃµ½ÁË´Ë²ÎÊı£¬ÀıÈçµ÷ÓÃsocket.sendÊ±´«ÈëµÄµÚ2¸öºÍµÚ3¸ö²ÎÊı·Ö±ğÎªdatºÍpar£¬Ôòitem={data=dat,para=par}
-·µ»ØÖµ£ºÎŞ
-]]
-function ntfy(idx,evt,result,item)
-	local hidx = getclient(idx)
-	print("ntfy",evt,result,item)
-	--Á¬½Ó½á¹û£¨µ÷ÓÃsocket.connectºóµÄÒì²½ÊÂ¼ş£©
-	if evt == "CONNECT" then
-		tclients[hidx].sckconning = false
-		--Á¬½Ó³É¹¦
-		if result then
-			tclients[hidx].sckconnected=true
-			tclients[hidx].sckreconncnt=0
-			tclients[hidx].sckreconncyclecnt=0
-			--Í£Ö¹ÖØÁ¬¶¨Ê±Æ÷
-			sys.timer_stop(reconn,idx)
-			tclients[hidx].connectedcb()
-		else
-			--RECONN_PERIODÃëºóÖØÁ¬
-			sys.timer_start(reconn,RECONN_PERIOD*1000,idx)
-		end	
-	--Êı¾İ·¢ËÍ½á¹û£¨µ÷ÓÃsocket.sendºóµÄÒì²½ÊÂ¼ş£©
-	elseif evt == "SEND" then
-		if result then
-			local sndata,sndIdx,sndPos = getnxtsnd(hidx,item.para.sndidx,item.para.sndpos)
-			if sndata~="" then
-				if not snd(idx,sndata,{sndidx=sndIdx,sndpos=sndPos}) then
-					clrsndbody(hidx)
-					if tclients[hidx].sckerrcb then tclients[hidx].sckerrcb("SEND") end
-				end
-			else
-				sys.timer_start(timerfnc,30000,hidx)
-			end
-		else
-			clrsndbody(hidx)
-			if tclients[hidx].sckerrcb then
-				tclients[hidx].sckreconncnt=0
-				tclients[hidx].sckreconncyclecnt=0
-				tclients[hidx].sckerrcb("SEND") 
-			end
-		end
-	--Á¬½Ó±»¶¯¶Ï¿ª
-	elseif evt == "STATE" and result == "CLOSED" then
-		tclients[hidx].sckconnected=false
-		tclients[hidx].sckconning = false
-		if tclients[hidx].rcvcb then tclients[hidx].rcvcb(tclients[hidx].contentlen==0x7FFFFFFF and 0 or 1,tclients[hidx].statuscode,tclients[hidx].rcvhead,tclients[hidx].filepath or tclients[hidx].rcvbody) end
-		sys.timer_stop(timerfnc,hidx)
-		sys.timer_stop(reconn,idx)
-		resetpara(hidx)
-		--³¤Á¬½ÓÊ±Ê¹ÓÃ
-		if tclients[hidx].mode then
-			sys.timer_start(connectitem,RECONN_PERIOD*1000,hidx)
-		end
-	--Á¬½ÓÖ÷¶¯¶Ï¿ª£¨µ÷ÓÃlink.shutºóµÄÒì²½ÊÂ¼ş£©
-	elseif evt == "STATE" and result == "SHUTED" then
-		tclients[hidx].sckconnected=false
-		tclients[hidx].sckconning = false
-		sys.timer_stop(timerfnc,hidx)
-		sys.timer_stop(reconn,idx)
-		resetpara(hidx)
-		--³¤Á¬½ÓÊ±Ê¹ÓÃ
-		if tclients[hidx].mode then
-			connectitem(hidx)
-		end
-	--Á¬½ÓÖ÷¶¯¶Ï¿ª£¨µ÷ÓÃsocket.disconnectºóµÄÒì²½ÊÂ¼ş£©
-	elseif evt == "DISCONNECT" then
-		tclients[hidx].sckconnected=false
-		tclients[hidx].sckconning = false
-		sys.timer_stop(timerfnc,hidx)
-		sys.timer_stop(reconn,idx)
-		resetpara(hidx)
-		if item=="USER" then
-			if tclients[hidx].discb then tclients[hidx].discb(idx) end
-			tclients[hidx].discing = false
-		end	
-	--³¤Á¬½ÓÊ±Ê¹ÓÃ
-		if tclients[hidx].mode or item=="RECONN" then
-			connectitem(hidx)
-		end
-	--Á¬½ÓÖ÷¶¯¶Ï¿ª²¢ÇÒÏú»Ù£¨µ÷ÓÃsocket.closeºóµÄÒì²½ÊÂ¼ş£©
-	elseif evt == "CLOSE" then
-		tclients[hidx].sckconnected=false
-		tclients[hidx].sckconning = false
-		sys.timer_stop(timerfnc,hidx)
-		sys.timer_stop(reconn,idx)
-		resetpara(hidx)
-		local cb = tclients[hidx].destroycb
-		table.remove(tclients,hidx)
-		if cb then cb() end
-	end
-	--ÆäËû´íÎó´¦Àí£¬¶Ï¿ªÊı¾İÁ´Â·£¬ÖØĞÂÁ¬½Ó
-	if smatch((type(result)=="string") and result or "","ERROR") then
-		socket.disconnect(idx)
-	end
-end
-
-function resetpara(hidx,clrdata)
-	tclients[hidx].statuscode=nil
-	tclients[hidx].rcvhead=nil
-	tclients[hidx].rcvbody,tclients[hidx].rcvLen=nil
-	tclients[hidx].status=nil
-	tclients[hidx].result=nil
-	tclients[hidx].rcvChunked,tclients[hidx].chunkSize=nil
-	tclients[hidx].filelen=nil
-	if clrdata or clrdata==nil then tclients[hidx].rcvData="" end
-end
-
---[[
-º¯ÊıÃû£ºtimerfnc
-¹¦ÄÜ  £º½ÓÊÕÊı¾İ³¬Ê±µÄ¶¨Ê±Æ÷´¦Àíº¯Êı
-²ÎÊı  £º
-        hidx£ºhttp clientÔÚtclients±íÖĞµÄË÷Òı	
-·µ»ØÖµ£ºÎŞ
-]]
-function timerfnc(hidx)
-	if tclients[hidx].rcvcb then tclients[hidx].rcvcb(3,tclients[hidx].statuscode,tclients[hidx].rcvhead,tclients[hidx].filepath or tclients[hidx].rcvbody) end
-	resetpara(hidx)
-end
-
---[[
-º¯ÊıÃû£ºrcv
-¹¦ÄÜ  £ºÊı¾İ½ÓÊÕ´¦Àíº¯Êı
-²ÎÊı  £º
-        idx£ºhttp client¶ÔÓ¦µÄsocket id	
-        data£ºÊÕµ½µÄÊı¾İ
-·µ»ØÖµ£ºÎŞ
-]]
-function rcv(idx,data)
-	local hidx = getclient(idx)
-	--ÉèÖÃÒ»¸ö¶¨Ê±Æ÷£¬Ê±¼äÎª30Ãë
-	sys.timer_start(timerfnc,30000,hidx)
-	
-	if data and tclients[hidx].rcvcb then
-		tclients[hidx].rcvData = (tclients[hidx].rcvData or "")..data
-		local d1,d2,v1
-		
-		--×´Ì¬ĞĞºÍÍ·
-		if not tclients[hidx].statuscode then
-			d1,d2 = sfind(tclients[hidx].rcvData,"\r\n\r\n")
-			if not(d1 and d2) then print("wait heads complete") return end
-			
-			local heads,k,v = ssub(tclients[hidx].rcvData,1,d2)
-			tclients[hidx].statuscode = smatch(heads,"%s(%d+)%s")
-			local _,crlf = sfind(heads,"\r\n")
-			heads = ssub(heads,crlf+1,-1)
-			if not tclients[hidx].rcvhead then tclients[hidx].rcvhead={} end
-			for k,v in sgmatch(heads,"(.-):%s*(.-)\r\n") do
-				tclients[hidx].rcvhead[k] = v
-				if (k=="Transfer-Encoding") and (v=="chunked") then tclients[hidx].rcvChunked = true end
-				
-			end
-			if not tclients[hidx].rcvChunked then
-				tclients[hidx].contentlen = tonumber(smatch(heads,"Content%-Length:%s*(%d+)\r\n"),10) or 0x7FFFFFFF
-			end
-			tclients[hidx].rcvData = ssub(tclients[hidx].rcvData,d2+1,-1)
-		end
-		
-		--chunk±àÂë´«Êä(body)
-		if tclients[hidx].rcvChunked then
-			while true do
-				if not tclients[hidx].chunkSize then
-					d1,d2,v1 = sfind(tclients[hidx].rcvData,"(%x+)\r\n")
-					--print(d1,d2,v1)
-					if not v1 then print("wait chunk-size complete") return end
-					tclients[hidx].chunkSize = tonumber(v1,16)
-					tclients[hidx].rcvData = ssub(tclients[hidx].rcvData,d2+1,-1)
-				end
-				
-				print("chunk-size",tclients[hidx].chunkSize,slen(tclients[hidx].rcvData))
-				
-				if slen(tclients[hidx].rcvData)<tclients[hidx].chunkSize+2 then print("wait chunk-data complete") return end
-				if tclients[hidx].chunkSize>0 then
-					local chunkData = ssub(tclients[hidx].rcvData,1,tclients[hidx].chunkSize)
-					if tclients[hidx].filepath then	
-						local f = io.open(tclients[hidx].filepath,"a+")
-						f:write(chunkData)
-						f:close()
-					else
-						tclients[hidx].rcvbody = (tclients[hidx].rcvbody or "")..chunkData
-					end
-				end
-
-				tclients[hidx].rcvData = ssub(tclients[hidx].rcvData,tclients[hidx].chunkSize+3,-1)
-				if tclients[hidx].chunkSize==0 then
-					tclients[hidx].rcvcb(0,tclients[hidx].statuscode,tclients[hidx].rcvhead,tclients[hidx].filepath or tclients[hidx].rcvbody)
-					sys.timer_stop(timerfnc,hidx)
-					resetpara(hidx,false)
-				else
-					tclients[hidx].chunkSize = nil
-				end
-			end
-		--Content-Length(body)
-		else
-			local rmnLen = tclients[hidx].contentlen-(tclients[hidx].rcvLen or 0)
-			local sData = ssub(tclients[hidx].rcvData,1,rmnLen)
-			tclients[hidx].rcvLen = (tclients[hidx].rcvLen or 0)+slen(sData)
-			
-			if tclients[hidx].filepath then
-				local f = io.open(tclients[hidx].filepath,"a+")
-				f:write(sData)
-				f:close()
-			else
-				tclients[hidx].rcvbody = (tclients[hidx].rcvbody or "")..sData
-			end
-
-			tclients[hidx].rcvData = ssub(tclients[hidx].rcvData,rmnLen+1,-1)			
-			if tclients[hidx].rcvLen==tclients[hidx].contentlen then
-				tclients[hidx].rcvcb(0,tclients[hidx].statuscode,tclients[hidx].rcvhead,tclients[hidx].filepath or tclients[hidx].rcvbody)
-				sys.timer_stop(timerfnc,hidx)
-				resetpara(hidx,false)
-			end
-		end
-	end
-end
-
-
---[[
-º¯ÊıÃû£ºconnect
-¹¦ÄÜ  £º´´½¨µ½ºóÌ¨·şÎñÆ÷µÄsocketÁ¬½Ó£»
-        Èç¹ûÊı¾İÍøÂçÒÑ¾­×¼±¸ºÃ£¬»áÀí½âÁ¬½ÓºóÌ¨£»·ñÔò£¬Á¬½ÓÇëÇó»á±»¹ÒÆğ£¬µÈÊı¾İÍøÂç×¼±¸¾ÍĞ÷ºó£¬×Ô¶¯È¥Á¬½ÓºóÌ¨
-		ntfy£ºsocket×´Ì¬µÄ´¦Àíº¯Êı
-		rcv£ºsocket½ÓÊÕÊı¾İµÄ´¦Àíº¯Êı
-²ÎÊı  £º
-		sckidx£ºsocket idx
-		prot£ºstringÀàĞÍ£¬´«Êä²ãĞ­Òé£¬½öÖ§³Ö"TCP"
-		host£ºstringÀàĞÍ£¬·şÎñÆ÷µØÖ·£¬Ö§³ÖÓòÃûºÍIPµØÖ·[±ØÑ¡]
-		port£ºnumberÀàĞÍ£¬·şÎñÆ÷¶Ë¿Ú[±ØÑ¡]
-·µ»ØÖµ£ºÎŞ
-]]
-function connect(sckidx,prot,host,port)
-	socket.connect(sckidx,prot,host,port,ntfy,rcv)
-	tclients[getclient(sckidx)].sckconning=true
-end
-
-
---´´Á¢Ôª±íÊ±ËùÓÃ
-local thttp = {}
-thttp.__index = thttp
-
---[[
-º¯ÊıÃû£ºcreate
-¹¦ÄÜ  £º´´½¨Ò»¸öhttp client
-²ÎÊı  £º
-		prot£ºstringÀàĞÍ£¬´«Êä²ãĞ­Òé£¬½öÖ§³Ö"TCP"
-		host£ºstringÀàĞÍ£¬·şÎñÆ÷µØÖ·£¬Ö§³ÖÓòÃûºÍIPµØÖ·[±ØÑ¡]
-		port£ºnumberÀàĞÍ£¬·şÎñÆ÷¶Ë¿Ú[±ØÑ¡]
-·µ»ØÖµ£ºÎŞ
-]]
-function create(host,port)
-	if #tclients>=2 then assert(false,"tclients maxcnt error") return end
-	local http_client =
-	{
-		prot="TCP",
-		host=host,
-		port=port or 80,		
-		sckidx=socket.SCK_MAX_CNT-#tclients-2,
-		sckconning=false,
-		sckconnected=false,
-		sckreconncnt=0,
-		sckreconncyclecnt=0,
-		discing=false,
-		status=false,
-		rcvbody=nil,
-		rcvhead={},
-		result=nil,
-		statuscode=nil,
-		contentlen=nil
-	}
-	setmetatable(http_client,thttp)
-	table.insert(tclients,http_client)
-	return(http_client)
-end
-
---[[
-º¯ÊıÃû£ºconnect
-¹¦ÄÜ  £ºÁ¬½Óhttp·şÎñÆ÷
-²ÎÊı  £º
-        connectedcb:functionÀàĞÍ£¬socket connected ³É¹¦»Øµ÷º¯Êı	
-		sckerrcb£ºfunctionÀàĞÍ£¬socketÁ¬½ÓÊ§°ÜµÄ»Øµ÷º¯Êı[¿ÉÑ¡]
-·µ»ØÖµ£ºÎŞ
-]]
-function thttp:connect(connectedcb,sckerrcb)
-	self.connectedcb=connectedcb
-	self.sckerrcb=sckerrcb
-	
-	tclients[getclient(self.sckidx)]=self
-	
-	if self.sckconnected then print("thttp:connect already connected") return end
-	if not self.sckconnected then
-		connect(self.sckidx,self.prot,self.host,self.port) 
+local function receive(client,timeout,cbFnc,result,prompt,head,body)
+    local res,data = client:recv(timeout)
+    if not res then
+        response(client,cbFnc,result,prompt or "receive timeout",head,body)
     end
-end
-
---[[
-º¯ÊıÃû£ºsetconnectionmode
-¹¦ÄÜ  £ºÉèÖÃÁ¬½ÓÄ£Ê½£¬³¤Á¬½Ó»¹ÊÇ¶ÌÁ´½Ó
-²ÎÊı  £º
-		v£ºtrueÎª³¤Á¬½Ó£¬falseÎª¶ÌÁ´½Ó
-·µ»ØÖµ£ºÎŞ
-]]
-function thttp:setconnectionmode(v)
-	self.mode=v
-end
-
---[[
-º¯ÊıÃû£ºdisconnect
-¹¦ÄÜ  £º¶Ï¿ªÒ»¸öhttp client£¬²¢ÇÒ¶Ï¿ªsocket
-²ÎÊı  £º
-		discb£ºfunctionÀàĞÍ£¬¶Ï¿ªºóµÄ»Øµ÷º¯Êı[¿ÉÑ¡]
-·µ»ØÖµ£ºÎŞ
-]]
-function thttp:disconnect(discb)
-	print("thttp:disconnect")
-	self.discb=discb
-	self.discing = true
-	socket.disconnect(self.sckidx,"USER")
-end
-
---[[
-º¯ÊıÃû£ºdestroy
-¹¦ÄÜ  £ºÏú»ÙÒ»¸öhttp client
-²ÎÊı  £º
-		destroycb£ºfunctionÀàĞÍ£¬mqtt clientÏú»ÙºóµÄ»Øµ÷º¯Êı[¿ÉÑ¡]
-·µ»ØÖµ£ºÎŞ
-]]
-function thttp:destroy(destroycb)
-	local k,v
-	self.destroycb = destroycb
-	for k,v in pairs(tclients) do
-		if v.sckidx==self.sckidx then
-			socket.close(v.sckidx)
-		end
-	end
-end
-
-function clrsndbody(hidx)	
-	local i=0
-	while tclients[hidx].body[i] do
-		if type(tclients[hidx].body[i])=="table" then
-			tclients[hidx].body[i] = nil
-		end
-		i = i+1
-	end
-	tclients[hidx].body=nil
+    return res,data
 end
 
 local function getFileBase64Len(s)
-	if s then return (io.filesize(s)+2)/3*4 end
- 
+    if s then return (io.fileSize(s)+2)/3*4 end
 end
 
---[[
-º¯ÊıÃû£ºrequest
-¹¦ÄÜ  £º·¢ËÍHTTPÇëÇó
-²ÎÊı  £º
-        cmdtyp£ºstringÀàĞÍ£¬HTTPµÄÇëÇó·½·¨£¬"GET"¡¢"POST"»òÕß"HEAD"	
-		url£ºstringÀàĞÍ£¬HTTPÇëÇóĞĞÖĞµÄURL×Ö¶Î
-		head£ºnil¡¢""»òÕßtableÀàĞÍ£¬HTTPµÄÇëÇóÍ·£¬libÖĞÄ¬ÈÏÎª×Ô¶¯Ìí¼ÓConnectionºÍHostÇëÇóÍ·
-			Èç¹ûĞèÒªÌí¼ÓÆäËûÇëÇóÍ·£¬±¾²ÎÊı´«ÈëtableÀàĞÍ¼´¿É£¬¸ñÊ½Îª{"head1: value1","head2: value2",...}
-        body£ºHTTPµÄÇëÇóÊµÌå,nil¡¢""»òÕßstringÀàĞÍ»òÕßtableÀàĞÍ
-			ÎªtableÀàĞÍÊ±£¬Ë÷ÒıÎªnumberÀàĞÍ£¬´Ó1¿ªÊ¼£¬°´ÕÕË÷Òı¶ÔÓ¦µÄÄÚÈİ£¬ÖğÒ»½øĞĞ·¢ËÍ£¬ÀıÈç
-			{
-				[1]="begin",
-				[2]={file="/ldata/post.jpg"},
-				[3]="end"
-			}
-			ÏÈ·¢ËÍ×Ö·û´®begin£¬È»ºó·¢ËÍÎÄ¼ş"/ldata/post.jpg"µÄÄÚÈİ£¬×îºó·¢ËÍ×Ö·û´®end
-			Èç¹ûÏë¶ÔÎÄ¼şÄÚÈİ½øĞĞbase64±àÂë£¬Çë½«file¸Ä³Éfile_base64,ÀıÈç£º
-			{
-				[1]="begin",
-				[2]={file_base64="/ldata/post.jpg"},
-				[3]="end"
-			}
+local function taskClient(method,protocal,auth,host,port,path,cert,head,body,timeout,cbFnc,rcvFilePath)
+    while not socket.isReady() do
+        if not sys.waitUntil("IP_READY_IND",timeout) then return response(nil,cbFnc,false,"network not ready") end
+    end
+    
+    --è®¡ç®—bodyé•¿åº¦
+    local bodyLen = 0
+    if body then
+        if type(body)=="string" then
+            bodyLen = body:len()
+        elseif type(body)=="table" then
+            for i=1,#body do
+                bodyLen = bodyLen + (type(body[i])=="string" and string.len(body[i]) or getFileBase64Len(body[i].file_base64) or io.fileSize(body[i].file))
+            end
+        end
+    end
+    
+    --é‡æ„head
+    local heads = head or {}
+    if not heads.Host then heads["Host"] = host end
+    if not heads.Connection then heads["Connection"] = "short" end
+    if bodyLen>0 and bodyLen~=tonumber(heads["Content-Length"] or "0") then heads["Content-Length"] = bodyLen end
+    if auth~="" and not heads.Authorization then heads["Authorization"] = ("Basic "..crypto.base64_encode(auth,#auth)) end
+    local headStr = ""
+    for k,v in pairs(heads) do
+        headStr = headStr..k..": "..v.."\r\n"
+    end
+    headStr = headStr.."\r\n"
+    
+    local client = socket.tcp(protocal=="https",cert)
+    if not client then return response(nil,cbFnc,false,"create socket error") end
+    if not client:connect(host,port) then
+        return response(client,cbFnc,false,"connect fail")
+    end
+    
+    --å‘é€è¯·æ±‚è¡Œ+è¯·æ±‚å¤´+stringç±»å‹çš„body
+    if not client:send(method.." "..path.." HTTP/1.1".."\r\n"..headStr..(type(body)=="string" and body or "")) then
+        return response(client,cbFnc,false,"send head fail")
+    end
+    
+    --å‘é€tableç±»å‹çš„body
+    if type(body)=="table" then
+        for i=1,#body do
+            if type(body[i])=="string" then
+                if not client:send(body[i]) then
+                    return response(client,cbFnc,false,"send body fail")
+                end
+            else
+                local file = io.open(body[i].file or body[i].file_base64,"rb")
+                if file then
+                    while true do
+                        local dat = file:read(body[i].file and 1460 or 1095)
+                        if not dat then
+                            io.close(file)
+                            break
+                        end
+                        if body[i].file_base64 then dat=crypto.base64_encode(dat,#dat) end
+                        if not client:send(dat) then
+                            io.close(file)
+                            return response(client,cbFnc,false,"send file fail")
+                        end
+                    end
+                else
+                    return response(client,cbFnc,false,"send file open fail")
+                end
+            end
+        end
+    end
+        
+    local rcvCache,rspHead,rspBody,d1,d2,result,data,statusCode,rcvChunked,contentLen = "",{},{}
+    --æ¥æ”¶æ•°æ®ï¼Œè§£æçŠ¶æ€è¡Œå’Œå¤´
+    while true do
+        result,data = receive(client,timeout,cbFnc,false,nil,rspHead,rcvFilePath or table.concat(rspBody))
+        if not result then return end
+        rcvCache = rcvCache..data
+        d1,d2 = rcvCache:find("\r\n\r\n")
+        if d2 then
+            --çŠ¶æ€è¡Œ
+            _,d1,statusCode = rcvCache:find("%s(%d+)%s.-\r\n")
+            if not statusCode then
+                return response(client,cbFnc,false,"parse received status error",rspHead,rcvFilePath or table.concat(rspBody))
+            end
+            --åº”ç­”å¤´
+            for k,v in string.gmatch(rcvCache:sub(d1+1,d2-2),"(.-):%s*(.-)\r\n") do
+                rspHead[k] = v
+                if (k=="Transfer-Encoding") and (v=="chunked") then rcvChunked = true end
 
-		rcvcb£ºfunctionÀàĞÍ£¬Ó¦´ğÊµÌåµÄÊı¾İ»Øµ÷º¯Êı
-		filepath£ºstringÀàĞÍ£¬Ó¦´ğÊµÌåµÄÊı¾İ±£´æÎªÎÄ¼şµÄÂ·¾¶£¬ÀıÈç"download.bin"£¬[¿ÉÑ¡]
-·µ»ØÖµ£ºÈç¹û´«ÈëÁËfilepath£¬·µ»Ø´¦ÀíºóµÄÎÄ¼ş±£´æµÄÍêÕûÂ·¾¶£»ÆäÓàÇé¿öÃ»ÓĞ·µ»ØÖµ
-]]
-function thttp:request(cmdtyp,url,head,body,rcvcb,filepath)
-	local headstr="" 
-	--Ä¬ÈÏ´«ËÍ·½Ê½Îª"GET"
-	self.cmdtyp=cmdtyp or "GET"
-	--Ä¬ÈÏÎª¸ùÄ¿Â¼
-	self.url=url or "/"
-	--Ä¬ÈÏÊµÌåÎª¿Õ
-	self.head={}
-	self.body=body or ""
-	self.rcvcb=rcvcb
-	
-	--ÖØ¹¹body²ÎÊı
-	if type(self.body)=="string" then
-		--self.body = {len=slen(self.body), sndidx=1, sndpos=0, [1]=self.body}
-		self.body = {[1]=self.body}
-	end
-	local bodylen,i = 0,1
-	--¼ÆËãbody×Ü³¤¶È
-	while self.body[i] do
-		if type(self.body[i])=="string" then
-			bodylen = bodylen+slen(self.body[i])
-		elseif type(self.body[i])=="table" then			
-			self.body[i].len =getFileBase64Len(self.body[i].file_base64) or io.filesize(self.body[i].file)
-			bodylen = bodylen+self.body[i].len
-		else
-			assert(false,"unsupport body type")
-		end
-		i = i+1
-	end
-	self.body.len = bodylen
-	
-	if filepath then
-		self.filepath = (ssub(filepath,1,1)~="/" and "/" or "")..filepath
-		if ssub(filepath,1,1)~="/" and rtos.make_dir and rtos.make_dir("/http_down") then self.filepath = "/http_down"..self.filepath end
-	else
-		self.filepath = nil
-	end
-
-	if not head or head=="" or (type(head)=="table" and #head==0) then
-		self.head={"Connection: keep-alive", "Host: "..self.host}
-		if cmdtyp=="POST" and self.body~="" and self.body~=nil then
-			table.insert(self.head,"Content-Length: "..self.body.len)
-		end
-	elseif type(head)=="table" and #head>0 then
-		local connhead,hosthead,conlen,k,v
-		for k,v in pairs(head) do
-			if sfind(v,"Connection: ")==1 then connhead = true end
-			if sfind(v,"Host: ")==1 then hosthead = true end
-			if sfind(v,"Content-Length: ")==1 then conlen = true end
-			table.insert(self.head,v)
-		end
-		if not hosthead then table.insert(self.head,1,"Host: "..self.host) end
-		if not connhead then table.insert(self.head,1,"Connection: keep-alive") end
-		if not conlen and cmdtyp=="POST" and self.body~="" and self.body~=nil then 
-			table.insert(self.head,1,"Content-Length: "..self.body.len) 
-		end
-	else
-		assert(false,"head format error")
-	end
-	
-	headstr=cmdtyp.." "..self.url.." HTTP/1.1"..'\r\n'
-	for k,v in pairs(self.head) do
-		headstr=headstr..v..'\r\n'
-	end
-	headstr = headstr.."\r\n"
-	self.body[0] = headstr
-	local sndata,sndpara = headstr,{sndidx=0,sndpos=utils.min(PACKET_LEN,slen(headstr))}
-	if type(self.body[1])=="string" and ((slen(self.body[1])+slen(headstr))<=PACKET_LEN) then 
-		sndata = headstr..self.body[1]
-		sndpara = {sndidx=1,sndpos=utils.min(PACKET_LEN,slen(self.body[1]))}
-	end		
-	if not snd(self.sckidx,sndata,sndpara) then
-		clrsndbody(getclient(self.sckidx))
-		if self.sckerrcb then self.sckerrcb("SEND") end
-	end
-	if filepath then return self.filepath end
+            end
+            if not rcvChunked then
+                contentLen = tonumber(rspHead["Content-Length"] or "2147483647")
+            end
+            --æœªå¤„ç†çš„bodyæ•°æ®
+            rcvCache = rcvCache:sub(d2+1,-1)
+            break
+        end
+    end
+    
+    --è§£æbody
+    if rcvChunked then
+        local chunkSize
+        --å¾ªç¯å¤„ç†æ¯ä¸ªchunk
+        while true do
+            --è§£æchunk size
+            if not chunkSize then
+                d1,d2,chunkSize = rcvCache:find("(%x+)\r\n")
+                if chunkSize then
+                    chunkSize = tonumber(chunkSize,16)
+                    rcvCache = rcvCache:sub(d2+1,-1)                    
+                else
+                    result,data = receive(client,timeout,cbFnc,false,nil,rspHead,rcvFilePath or table.concat(rspBody))
+                    if not result then return end
+                    rcvCache = rcvCache..data
+                end
+            end
+            
+            --log.info("http.taskClient chunkSize",chunkSize)
+            
+            --è§£æchunk data
+            if chunkSize then
+                if rcvCache:len()<chunkSize+2 then
+                    result,data = receive(client,timeout,cbFnc,false,nil,rspHead,rcvFilePath or table.concat(rspBody))
+                    if not result then return end
+                    rcvCache = rcvCache..data
+                else
+                    if chunkSize>0 then
+                        local chunkData = rcvCache:sub(1,chunkSize)
+                        --ä¿å­˜åˆ°æ–‡ä»¶ä¸­
+                        if rcvFilePath then
+                            local file = io.open(rcvFilePath,"a+")
+                            if not file then return response(client,cbFnc,false,"receiveï¼šopen file error",rspHead,rcvFilePath or table.concat(rspBody)) end
+                            if not file:write(chunkData) then response(client,cbFnc,false,"receiveï¼šwrite file error",rspHead,rcvFilePath or table.concat(rspBody)) end
+                            file:close()
+                        --ä¿å­˜åˆ°ç¼“å†²åŒºä¸­
+                        else
+                            table.insert(rspBody,chunkData)
+                        end                    
+                        rcvCache = rcvCache:sub(chunkSize+3,-1)
+                        chunkSize = nil
+                    elseif chunkSize==0 then
+                        return response(client,cbFnc,true,statusCode,rspHead,rcvFilePath or table.concat(rspBody))
+                    end
+                end                
+            end
+        end
+    else
+        local rmnLen = contentLen
+        while true do
+            data = rcvCache:len()<=rmnLen and rcvCache or rcvCache:sub(1,rmnLen)
+            --ä¿å­˜åˆ°æ–‡ä»¶ä¸­
+            if rcvFilePath then
+                if data:len()>0 then
+                    local file = io.open(rcvFilePath,"a+")
+                    if not file then return response(client,cbFnc,false,"receiveï¼šopen file error",rspHead,rcvFilePath or table.concat(rspBody)) end
+                    if not file:write(data) then response(client,cbFnc,false,"receiveï¼šwrite file error",rspHead,rcvFilePath or table.concat(rspBody)) end
+                    file:close()
+                end
+            else
+                table.insert(rspBody,data)
+            end
+            rmnLen = rmnLen-data:len()
+            if rmnLen==0 then break end
+            result,rcvCache = receive(client,timeout,cbFnc,contentLen==0x7FFFFFFF,contentLen==0x7FFFFFFF and statusCode or nil,rspHead,rcvFilePath or table.concat(rspBody))
+            if not result then return end
+        end
+        return response(client,cbFnc,true,statusCode,rspHead,rcvFilePath or table.concat(rspBody))
+    end
 end
 
---[[
-º¯ÊıÃû£ºgetstatus
-¹¦ÄÜ  £º»ñÈ¡HTTP CLIENTµÄ×´Ì¬
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºHTTP CLIENTµÄ×´Ì¬£¬stringÀàĞÍ£¬¹²3ÖÖ×´Ì¬£º
-		DISCONNECTED£ºÎ´Á¬½Ó×´Ì¬
-		CONNECTING£ºÁ¬½ÓÖĞ×´Ì¬
-		CONNECTED£ºÁ¬½Ó×´Ì¬
-]]
-function thttp:getstatus()
-	if self.sckconnected then
-		return "CONNECTED"
-	elseif self.sckconning then
-		return "CONNECTING"
-	else
-		return "DISCONNECTED"
-	end
-end
+--- å‘é€HTTPè¯·æ±‚
+-- @string method HTTPè¯·æ±‚æ–¹æ³•
+-- æ”¯æŒ"GET"ï¼Œ"HEAD"ï¼Œ"POST"ï¼Œ"OPTIONS"ï¼Œ"PUT"ï¼Œ"DELETE"ï¼Œ"TRACE"ï¼Œ"CONNECT"
+-- @string url HTTPè¯·æ±‚url
+-- urlæ ¼å¼(é™¤hostnameå¤–ï¼Œå…¶ä½™å­—æ®µå¯é€‰ï¼›ç›®å‰çš„å®ç°ä¸æ”¯æŒhash)
+-- |------------------------------------------------------------------------------|
+-- | protocol |||   auth    |      host       |           path            | hash  |
+-- |----------|||-----------|-----------------|---------------------------|-------|
+-- |          |||           | hostname | port | pathname |     search     |       |
+-- |          |||           |----------|------|----------|----------------|       |
+-- " http[s]  :// user:pass @ host.com : 8080   /p/a/t/h ?  query=string  # hash  " 
+-- |          |||           |          |      |          |                |       |
+-- |------------------------------------------------------------------------------|
+-- @table[opt=nil] certï¼Œtableæˆ–è€…nilç±»å‹ï¼Œsslè¯ä¹¦ï¼Œå½“urlä¸ºhttpsç±»å‹æ—¶ï¼Œæ­¤å‚æ•°æ‰æœ‰æ„ä¹‰ã€‚certæ ¼å¼å¦‚ä¸‹ï¼š
+-- {
+--     caCert = "ca.crt", --CAè¯ä¹¦æ–‡ä»¶(Base64ç¼–ç  X.509æ ¼å¼)ï¼Œå¦‚æœå­˜åœ¨æ­¤å‚æ•°ï¼Œåˆ™è¡¨ç¤ºå®¢æˆ·ç«¯ä¼šå¯¹æœåŠ¡å™¨çš„è¯ä¹¦è¿›è¡Œæ ¡éªŒï¼›ä¸å­˜åœ¨åˆ™ä¸æ ¡éªŒ
+--     clientCert = "client.crt", --å®¢æˆ·ç«¯è¯ä¹¦æ–‡ä»¶(Base64ç¼–ç  X.509æ ¼å¼)ï¼ŒæœåŠ¡å™¨å¯¹å®¢æˆ·ç«¯çš„è¯ä¹¦è¿›è¡Œæ ¡éªŒæ—¶ä¼šç”¨åˆ°æ­¤å‚æ•°
+--     clientKey = "client.key", --å®¢æˆ·ç«¯ç§é’¥æ–‡ä»¶(Base64ç¼–ç  X.509æ ¼å¼)
+--     clientPassword = "123456", --å®¢æˆ·ç«¯è¯ä¹¦æ–‡ä»¶å¯†ç [å¯é€‰]
+-- }
+-- @table[opt=nil] headï¼Œnilæˆ–è€…tableç±»å‹ï¼Œè‡ªå®šä¹‰è¯·æ±‚å¤´
+--      http.luaä¼šè‡ªåŠ¨æ·»åŠ Host: XXXã€Connection: shortã€Content-Length: XXXä¸‰ä¸ªè¯·æ±‚å¤´
+--      å¦‚æœè¿™ä¸‰ä¸ªè¯·æ±‚å¤´æ»¡è¶³ä¸äº†éœ€æ±‚ï¼Œheadå‚æ•°ä¼ å…¥è‡ªå®šä¹‰è¯·æ±‚å¤´ï¼Œå¦‚æœè‡ªå®šä¹‰è¯·æ±‚å¤´ä¸­å­˜åœ¨Hostã€Connectionã€Content-Lengthä¸‰ä¸ªè¯·æ±‚å¤´ï¼Œå°†è¦†ç›–http.luaä¸­è‡ªåŠ¨æ·»åŠ çš„åŒåè¯·æ±‚å¤´
+--      headæ ¼å¼å¦‚ä¸‹ï¼š
+--          å¦‚æœæ²¡æœ‰è‡ªå®šä¹‰è¯·æ±‚å¤´ï¼Œä¼ å…¥nilæˆ–è€…{}ï¼›å¦åˆ™ä¼ å…¥{head1="value1", head2="value2", head3="value3"}ï¼Œvalueä¸­ä¸èƒ½æœ‰\r\n
+-- @param[opt=nil] bodyï¼Œnilã€stringæˆ–è€…tableç±»å‹ï¼Œè¯·æ±‚å®ä½“
+--      å¦‚æœbodyä»…ä»…æ˜¯ä¸€ä¸²æ•°æ®ï¼Œå¯ä»¥ç›´æ¥ä¼ å…¥ä¸€ä¸ªstringç±»å‹çš„bodyå³å¯
+--
+--      å¦‚æœbodyçš„æ•°æ®æ¯”è¾ƒå¤æ‚ï¼ŒåŒ…æ‹¬å­—ç¬¦ä¸²æ•°æ®å’Œæ–‡ä»¶ï¼Œåˆ™ä¼ å…¥tableç±»å‹çš„æ•°æ®ï¼Œæ ¼å¼å¦‚ä¸‹ï¼š
+--      {
+--          [1] = "string1",
+--          [2] = {file="/ldata/test.jpg"},
+--          [3] = "string2"
+--      }
+--      ä¾‹å¦‚ä¸Šé¢çš„è¿™ä¸ªbodyï¼Œç´¢å¼•å¿…é¡»ä¸ºè¿ç»­çš„æ•°å­—(ä»1å¼€å§‹)ï¼Œå®é™…ä¼ è¾“æ—¶ï¼Œå…ˆå‘é€å­—ç¬¦ä¸²"string1"ï¼Œå†å‘é€æ–‡ä»¶/ldata/test.jpgçš„å†…å®¹ï¼Œæœ€åå‘é€å­—ç¬¦ä¸²"string2"
+--
+--      å¦‚æœä¼ è¾“çš„æ–‡ä»¶å†…å®¹éœ€è¦è¿›è¡Œbase64ç¼–ç å†ä¸Šä¼ ï¼Œè¯·æŠŠfileæ”¹æˆfile_base64ï¼Œæ ¼å¼å¦‚ä¸‹ï¼š
+--      {
+--          [1] = "string1",
+--          [2] = {file_base64="/ldata/test.jpg"},
+--          [3] = "string2"
+--      }
+--      ä¾‹å¦‚ä¸Šé¢çš„è¿™ä¸ªbodyï¼Œç´¢å¼•å¿…é¡»ä¸ºè¿ç»­çš„æ•°å­—(ä»1å¼€å§‹)ï¼Œå®é™…ä¼ è¾“æ—¶ï¼Œå…ˆå‘é€å­—ç¬¦ä¸²"string1"ï¼Œå†å‘é€æ–‡ä»¶/ldata/test.jpgç»è¿‡base64ç¼–ç åçš„å†…å®¹ï¼Œæœ€åå‘é€å­—ç¬¦ä¸²"string2"
+-- @number[opt=30000] timeoutï¼Œè¯·æ±‚å‘é€æˆåŠŸåï¼Œæ¥æ”¶æœåŠ¡å™¨è¿”å›åº”ç­”æ•°æ®çš„è¶…æ—¶æ—¶é—´ï¼Œå•ä½æ¯«ç§’ï¼Œé»˜è®¤ä¸º30ç§’
+-- @function[opt=nil] cbFncï¼Œæ‰§è¡ŒHTTPè¯·æ±‚çš„å›è°ƒå‡½æ•°(è¯·æ±‚å‘é€ç»“æœä»¥åŠåº”ç­”æ•°æ®æ¥æ”¶ç»“æœéƒ½é€šè¿‡æ­¤å‡½æ•°é€šçŸ¥ç”¨æˆ·)ï¼Œå›è°ƒå‡½æ•°çš„è°ƒç”¨å½¢å¼ä¸ºï¼š
+--      cbFnc(result,prompt,head,body)
+--      resultï¼štrueæˆ–è€…falseï¼Œtrueè¡¨ç¤ºæˆåŠŸæ”¶åˆ°äº†æœåŠ¡å™¨çš„åº”ç­”ï¼Œfalseè¡¨ç¤ºè¯·æ±‚å‘é€å¤±è´¥æˆ–è€…æ¥æ”¶æœåŠ¡å™¨åº”ç­”å¤±è´¥
+--      promptï¼šstringç±»å‹ï¼Œresultä¸ºtrueæ—¶ï¼Œè¡¨ç¤ºæœåŠ¡å™¨çš„åº”ç­”ç ï¼›resultä¸ºfalseæ—¶ï¼Œè¡¨ç¤ºé”™è¯¯ä¿¡æ¯
+--      headï¼štableæˆ–è€…nilç±»å‹ï¼Œè¡¨ç¤ºæœåŠ¡å™¨çš„åº”ç­”å¤´ï¼›resultä¸ºtrueæ—¶ï¼Œæ­¤å‚æ•°ä¸º{head1="value1", head2="value2", head3="value3"}ï¼Œvalueä¸­ä¸åŒ…å«\r\nï¼›resultä¸ºfalseæ—¶ï¼Œæ­¤å‚æ•°ä¸ºnil
+--      bodyï¼šstringç±»å‹ï¼Œå¦‚æœè°ƒç”¨requestæ¥å£æ—¶ä¼ å…¥äº†rcvFileNameï¼Œæ­¤å‚æ•°è¡¨ç¤ºä¸‹è½½æ–‡ä»¶çš„å®Œæ•´è·¯å¾„ï¼›å¦åˆ™è¡¨ç¤ºæ¥æ”¶åˆ°çš„åº”ç­”å®ä½“æ•°æ®
+-- @string[opt=nil] rcvFileNameï¼Œä¿å­˜â€œæœåŠ¡å™¨åº”ç­”å®ä½“æ•°æ®â€çš„æ–‡ä»¶åï¼Œå¯ä»¥ä¼ å…¥å®Œæ•´çš„æ–‡ä»¶è·¯å¾„ï¼Œä¹Ÿå¯ä»¥ä¼ å…¥å•ç‹¬çš„æ–‡ä»¶åï¼Œå¦‚æœæ˜¯æ–‡ä»¶åï¼Œhttp.luaä¼šè‡ªåŠ¨ç”Ÿæˆä¸€ä¸ªå®Œæ•´è·¯å¾„ï¼Œé€šè¿‡cbFncçš„å‚æ•°bodyä¼ å‡º
+-- @return string rcvFilePathï¼Œå¦‚æœä¼ å…¥äº†rcvFileNameï¼Œåˆ™è¿”å›å¯¹åº”çš„å®Œæ•´è·¯å¾„ï¼›å…¶ä½™æƒ…å†µéƒ½è¿”å›nil
+-- @usage 
+-- http.request("GET","www.lua.org",nil,nil,nil,30000,cbFnc)
+-- http.request("GET","http://www.lua.org",nil,nil,nil,30000,cbFnc)
+-- http.request("GET","http://www.lua.org:80",nil,nil,nil,30000,cbFnc,"download.bin")
+-- http.request("GET","www.lua.org/about.html",nil,nil,nil,30000,cbFnc)
+-- http.request("GET","www.lua.org:80/about.html",nil,nil,nil,30000,cbFnc)
+-- http.request("GET","http://wiki.openluat.com/search.html?q=123",nil,nil,nil,30000,cbFnc)
+-- http.request("POST","www.test.com/report.html",nil,{Head1="ValueData1"},"BodyData",30000,cbFnc)
+-- http.request("POST","www.test.com/report.html",nil,{Head1="ValueData1",Head2="ValueData2"},{[1]="string1",[2] ={file="/ldata/test.jpg"},[3]="string2"},30000,cbFnc)
+-- http.request("GET","https://www.baidu.com",{caCert="ca.crt"})
+-- http.request("GET","https://www.baidu.com",{caCert="ca.crt",clientCert = "client.crt",clientKey = "client.key"})
+-- http.request("GET","https://www.baidu.com",{caCert="ca.crt",clientCert = "client.crt",clientKey = "client.key",clientPassword = "123456"})
+function request(method,url,cert,head,body,timeout,cbFnc,rcvFileName)
+    local protocal,auth,hostName,port,path,d1,d2,offset,rcvFilePath
 
---[[
-º¯ÊıÃû£ºgetrcvpercent
-¹¦ÄÜ  £º»ñÈ¡½ÓÊÕµ½Êı¾İµÄ°Ù·Ö±È
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£º°Ù·Ö±È£¬0µ½100
-]]
-function thttp:getrcvpercent()
-	if not self.rcvChunked and self.rcvLen and self.rcvLen>0 and self.contentlen and self.contentlen>0 then
-		return (100*self.rcvLen-(100*self.rcvLen%self.contentlen))/self.contentlen
-	end
-	return 0
+    d1,d2,protocal = url:find("^(%a+)://")
+    if not protocal then protocal = "http" end
+    offset = d2 or 0
+
+    d1,d2,auth = url:find("(.-:.-)@",offset+1)
+    offset = d2 or offset
+
+    if url:match("^[^/]+:(%d+)",offset+1) then
+        d1,d2,hostName,port = url:find("^([^/]+):(%d+)",offset+1)
+    else
+        d1,d2,hostName = url:find("(.-)/",offset+1)
+        if hostName then
+            d2 = d2-1
+        else
+            hostName = url:sub(offset+1,-1)
+            offset = url:len()
+        end
+    end
+
+    if not hostName then return response(nil,cbFnc,false,"Invalid url, can't get host") end
+    if port=="" or not port then port = (protocal=="https" and 443 or 80) end
+    offset = d2 or offset
+
+    path = url:sub(offset+1,-1)
+
+    if rcvFileName and rcvFileName:sub(1,1)~="/" and rtos.make_dir and rtos.make_dir("/http_down") then
+        rcvFilePath = "/http_down/"..rcvFileName
+    end
+    
+    sys.taskInit(taskClient,method,protocal,auth or "",hostName,port,path=="" and "/" or path,cert,head,body or "",timeout or 30000,cbFnc,rcvFilePath or rcvFileName)
+    
+    return rcvFilePath or rcvFileName
 end
 

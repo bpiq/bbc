@@ -1,1139 +1,476 @@
---[[
-Ä£¿éÃû³Æ£ºmqttĞ­Òé¹ÜÀí
-Ä£¿é¹¦ÄÜ£ºÊµÏÖĞ­ÒéµÄ×é°üºÍ½â°ü£¬ÇëÊ×ÏÈÔÄ¶Áhttp://public.dhe.ibm.com/software/dw/webservices/ws-mqtt/mqtt-v3r1.htmlÁË½âmqttĞ­Òé
-Ä£¿é×îºóĞŞ¸ÄÊ±¼ä£º2017.02.24
-]]
+--- æ¨¡å—åŠŸèƒ½ï¼šMQTTå®¢æˆ·ç«¯
+-- @module mqtt
+-- @author openLuat
+-- @license MIT
+-- @copyright openLuat
+-- @release 2017.10.24
+require "log"
+require "socket"
+require "utils"
+module(..., package.seeall)
 
---[[
-Ä¿Ç°Ö»Ö§³ÖQoS=0ºÍQoS=1£¬²»Ö§³ÖQoS=2
-]]
+-- MQTT æŒ‡ä»¤id
+local CONNECT, CONNACK, PUBLISH, PUBACK, PUBREC, PUBREL, PUBCOMP, SUBSCRIBE, SUBACK, UNSUBSCRIBE, UNSUBACK, PINGREQ, PINGRESP, DISCONNECT = 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14
+local CLIENT_COMMAND_TIMEOUT = 20000
 
-module(...,package.seeall)
-
-local lpack = require"pack"
-require"common"
-require"socket"
-require"mqttdup"
-
-local slen,sbyte,ssub,sgsub,schar,srep,smatch,sgmatch = string.len,string.byte,string.sub,string.gsub,string.char,string.rep,string.match,string.gmatch
---±¨ÎÄÀàĞÍ
-CONNECT,CONNACK,PUBLISH,PUBACK,PUBREC,PUBREL,PUBCOMP,SUBSCRIBE,SUBACK,UNSUBSCRIBE,UNSUBACK,PINGREQ,PINGRSP,DISCONNECT = 1,2,3,4,5,6,7,8,9,10,11,12,13,14
---±¨ÎÄĞòÁĞºÅ
-local seq = 1
-
-local function print(...)
-	_G.print("mqtt",...)
+local function encodeLen(len)
+    local s = ""
+    local digit
+    repeat
+        digit = len % 128
+        len = (len - digit) / 128
+        if len > 0 then
+            digit = bit.bor(digit, 0x80)
+        end
+        s = s .. string.char(digit)
+    until (len <= 0)
+    return s
 end
 
-local function encutf8(s)
-	if not s then return "" end
-	local utf8s = common.gb2312toutf8(s)
-	return lpack.pack(">HA",slen(utf8s),utf8s)
+local function encodeUTF8(s)
+    if not s or #s == 0 then
+        return ""
+    else
+        return pack.pack(">P", s)
+    end
 end
 
-local function enclen(s)
-	if not s or slen(s) == 0 then return schar(0) end
-	local ret,len,digit = "",slen(s)
-	repeat
-		digit = len % 128
-		len = (len-digit) / 128
-		if len > 0 then
-			digit = bit.bor(digit,0x80)
-		end
-		ret = ret..schar(digit)
-	until (len <= 0)
-	return ret
+local function packCONNECT(clientId, keepAlive, username, password, cleanSession, will, version)
+    local content = pack.pack(">PbbHPAAAA",
+        version == "3.1" and "MQIsdp" or "MQTT",
+        version == "3.1" and 3 or 4,
+        (#username == 0 and 0 or 1) * 128 + (#password == 0 and 0 or 1) * 64 + will.retain * 32 + will.qos * 8 + will.flag * 4 + cleanSession * 2,
+        keepAlive,
+        clientId,
+        encodeUTF8(will.topic),
+        encodeUTF8(will.payload),
+        encodeUTF8(username),
+        encodeUTF8(password))
+    return pack.pack(">bAA",
+        CONNECT * 16,
+        encodeLen(string.len(content)),
+        content)
 end
 
-local function declen(s)
-	local i,value,multiplier,digit = 1,0,1
-	repeat
-		if i > slen(s) then return end
-		digit = sbyte(s,i)
-		value = value + bit.band(digit,127)*multiplier
-		multiplier = multiplier * 128
-		i = i + 1
-	until (bit.band(digit,128) == 0)
-	return true,value,i-1
+local function packSUBSCRIBE(dup, packetId, topics)
+    local header = SUBSCRIBE * 16 + dup * 8 + 2
+    local data = pack.pack(">H", packetId)
+    for topic, qos in pairs(topics) do
+        data = data .. pack.pack(">Pb", topic, qos)
+    end
+    return pack.pack(">bAA", header, encodeLen(#data), data)
 end
 
-local function getseq()
-	local s = seq
-	seq = (seq+1)%0xFFFF
-	if seq == 0 then seq = 1 end
-	return lpack.pack(">H",s)
+local function packUNSUBSCRIBE(dup, packetId, topics)
+    local header = UNSUBSCRIBE * 16 + dup * 8 + 2
+    local data = pack.pack(">H", packetId)
+    for k, topic in pairs(topics) do
+        data = data .. pack.pack(">P", topic)
+    end
+    return pack.pack(">bAA", header, encodeLen(#data), data)
 end
 
-local function iscomplete(s)
-	local i,typ,flg,len,cnt
-	for i=1,slen(s) do
-		typ = bit.band(bit.rshift(sbyte(s,i),4),0x0f)
-		--print("typ",typ)
-		if typ >= CONNECT and typ <= DISCONNECT then
-			flg,len,cnt = declen(ssub(s,i+1,-1))
-			--print("f",flg,len,cnt,(slen(ssub(s,i+1,-1))-cnt))
-			if flg and cnt <= 4 and len <= (slen(ssub(s,i+1,-1))-cnt) then
-				return true,i,i+cnt+len,typ,len
-			else
-				return
-			end
-		end
-	end
+local function packPUBLISH(dup, qos, retain, packetId, topic, payload)
+    local header = PUBLISH * 16 + dup * 8 + qos * 2 + retain
+    local len = 2 + #topic + #payload
+    if qos > 0 then
+        return pack.pack(">bAPHA", header, encodeLen(len + 2), topic, packetId, payload)
+    else
+        return pack.pack(">bAPA", header, encodeLen(len), topic, payload)
+    end
 end
 
---[[
-º¯ÊıÃû£ºpack
-¹¦ÄÜ  £ºMQTT×é°ü
-²ÎÊı  £º
-		mqttver£ºmqttĞ­Òé°æ±¾ºÅ
-		typ£º±¨ÎÄÀàĞÍ
-		...£º¿É±ä²ÎÊı
-·µ»ØÖµ£ºµÚÒ»¸ö·µ»ØÖµÊÇ±¨ÎÄÊı¾İ£¬µÚ¶ş¸ö·µ»ØÖµÊÇÃ¿ÖÖ±¨ÎÄ×Ô¶¨ÒåµÄ²ÎÊı
-]]
-local function pack(mqttver,typ,...)
-	local para = {}
-	local function connect(alive,id,twill,user,pwd,cleansess)
-		local ret = lpack.pack(">bAbbHA",
-						CONNECT*16,
-						encutf8(mqttver=="3.1.1" and "MQTT" or "MQIsdp"),
-						mqttver=="3.1.1" and 4 or 3,
-						(user and 1 or 0)*128+(pwd and 1 or 0)*64+twill.retain*32+twill.qos*8+twill.flg*4+(cleansess or 1)*2,
-						alive,
-						encutf8(id))
-		if twill.flg==1 then
-			ret = ret..encutf8(twill.topic)..encutf8(twill.payload)
-		end
-		ret = ret..encutf8(user)..encutf8(pwd)
-		return ret
-	end
-
-	local function subscribe(p)
-		para.dup,para.topic = true,p.topic
-		para.seq = p.seq or getseq()
-		print("subscribe",p.dup,para.dup,common.binstohexs(para.seq))
-
-		local s = lpack.pack("bA",SUBSCRIBE*16+(p.dup and 1 or 0)*8+2,para.seq)
-		for i=1,#p.topic do
-			s = s..encutf8(p.topic[i].topic)..schar(p.topic[i].qos or 0)
-		end
-		return s
-	end
-
-	local function publish(p)
-		para.dup,para.topic,para.payload,para.qos,para.retain = true,p.topic,p.payload,p.qos,p.retain
-		para.seq = p.seq or getseq()
-		--print("publish",p.dup,para.dup,common.binstohexs(para.seq))
-		local s1 = lpack.pack("bAA",PUBLISH*16+(p.dup and 1 or 0)*8+(p.qos or 0)*2+p.retain or 0,encutf8(p.topic),((p.qos or 0)>0 and para.seq or ""))
-		local s2 = s1..p.payload
-		return s2
-	end
-
-	local function puback(seq)
-		return schar(PUBACK*16)..seq
-	end
-
-	local function pingreq()
-		return schar(PINGREQ*16)
-	end
-
-	local function disconnect()
-		return schar(DISCONNECT*16)
-	end
-
-	local function unsubscribe(p)
-		para.dup,para.topic = true,p.topic
-		para.seq = p.seq or getseq()
-		print("unsubscribe",p.dup,para.dup,common.binstohexs(para.seq))
-
-		local s = lpack.pack("bA",UNSUBSCRIBE*16+(p.dup and 1 or 0)*8+2,para.seq)
-		for i=1,#p.topic do
-			s = s..encutf8(p.topic[i])
-		end
-		return s
-	end
-
-	local procer =
-	{
-		[CONNECT] = connect,
-		[SUBSCRIBE] = subscribe,
-		[PUBLISH] = publish,
-		[PUBACK] = puback,
-		[PINGREQ] = pingreq,
-		[DISCONNECT] = disconnect,
-		[UNSUBSCRIBE] = unsubscribe,
-	}
-
-	local s = procer[typ](...)
-	local s1,s2,s3 = ssub(s,1,1),enclen(ssub(s,2,-1)),ssub(s,2,-1)
-	s = s1..s2..s3
-	print("pack",typ,(slen(s) > 200) and "" or common.binstohexs(s))
-	return s,para
+local function packACK(id, dup, packetId)
+    return pack.pack(">bbH", id * 16 + dup * 8 + (id == PUBREL and 1 or 0) * 2, 0x02, packetId)
 end
 
-local rcvpacket = {}
-
---[[
-º¯ÊıÃû£ºunpack
-¹¦ÄÜ  £ºMQTT½â°ü
-²ÎÊı  £º
-		mqttver£ºmqttĞ­Òé°æ±¾ºÅ
-		s£ºÒ»ÌõÍêÕûµÄ±¨ÎÄ
-·µ»ØÖµ£ºÈç¹û½â°ü³É¹¦£¬·µ»ØÒ»¸ötableÀàĞÍÊı¾İ£¬Êı¾İÔªËØÓÉ±¨ÎÄÀàĞÍ¾ö¶¨£»Èç¹û½â°üÊ§°Ü£¬·µ»Ønil
-]]
-local function unpack(mqttver,s)
-	rcvpacket = {}
-
-	local function connack(d)
-		print("connack",common.binstohexs(d))
-		rcvpacket.suc = (sbyte(d,2)==0)
-		rcvpacket.reason = sbyte(d,2)
-		return true
-	end
-
-	local function suback(d)
-		print("suback or unsuback",common.binstohexs(d))
-		if slen(d) < 2 then return end
-		rcvpacket.seq = ssub(d,1,2)
-		return true
-	end
-
-	local function puback(d)
-		print("puback",common.binstohexs(d))
-		if slen(d) < 2 then return end
-		rcvpacket.seq = ssub(d,1,2)
-		return true
-	end
-
-	local function publish(d)
-		--print("publish",common.binstohexs(d)) --Êı¾İÁ¿Ì«´óÊ±²»ÄÜ´ò¿ª£¬ÄÚ´æ²»×ã
-		if slen(d) < 4 then return end
-		local _,tplen = lpack.unpack(ssub(d,1,2),">H")
-		local pay = (rcvpacket.qos > 0 and 5 or 3)
-		if slen(d) < tplen+pay-1 then return end
-		rcvpacket.topic = ssub(d,3,2+tplen)
-
-		if rcvpacket.qos > 0 then
-			rcvpacket.seq = ssub(d,tplen+3,tplen+4)
-			pay = 5
-		end
-		rcvpacket.payload = ssub(d,tplen+pay,-1)
-		return true
-	end
-
-	local function empty()
-		return true
-	end
-
-	local procer =
-	{
-		[CONNACK] = connack,
-		[SUBACK] = suback,
-		[PUBACK] = puback,
-		[PUBLISH] = publish,
-		[PINGRSP] = empty,
-		[UNSUBACK] = suback,
-	}
-	local d1,d2,d3,typ,len = iscomplete(s)
-	if not procer[typ] then print("unpack unknwon typ",typ) return end
-	rcvpacket.typ = typ
-	rcvpacket.qos = bit.rshift(bit.band(sbyte(s,1),0x06),1)
-	rcvpacket.dup = bit.rshift(bit.band(sbyte(s,1),0x08),3)==1
-	print("unpack",typ,rcvpacket.qos,(slen(s) > 200) and "" or common.binstohexs(s))
-	return procer[typ](ssub(s,slen(s)-len+1,-1)) and rcvpacket or nil
+local function packZeroData(id, dup, qos, retain)
+    dup = dup or 0
+    qos = qos or 0
+    retain = retain or 0
+    return pack.pack(">bb", id * 16 + dup * 8 + qos * 2 + retain, 0)
 end
 
-
---Ò»¸öÁ¬½ÓÖÜÆÚÄÚµÄ¶¯×÷£ºÈç¹ûÁ¬½ÓºóÌ¨Ê§°Ü£¬»á³¢ÊÔÖØÁ¬£¬ÖØÁ¬¼ä¸ôÎªRECONN_PERIODÃë£¬×î¶àÖØÁ¬RECONN_MAX_CNT´Î
---Èç¹ûÒ»¸öÁ¬½ÓÖÜÆÚÄÚ¶¼Ã»ÓĞÁ¬½Ó³É¹¦£¬ÔòµÈ´ıRECONN_CYCLE_PERIODÃëºó£¬ÖØĞÂ·¢ÆğÒ»¸öÁ¬½ÓÖÜÆÚ
---Èç¹ûÁ¬ĞøRECONN_CYCLE_MAX_CNT´ÎµÄÁ¬½ÓÖÜÆÚ¶¼Ã»ÓĞÁ¬½Ó³É¹¦£¬ÔòÖØÆôÈí¼ş
-local RECONN_MAX_CNT,RECONN_PERIOD,RECONN_CYCLE_MAX_CNT,RECONN_CYCLE_PERIOD = 3,5,3,20
-
---mqtt clients´æ´¢±í
-local tclients = {}
-
---[[
-º¯ÊıÃû£ºgetclient
-¹¦ÄÜ  £º·µ»ØÒ»¸ömqtt clientÔÚtclientsÖĞµÄË÷Òı
-²ÎÊı  £º
-		sckidx£ºmqtt client¶ÔÓ¦µÄsocketË÷Òı
-·µ»ØÖµ£ºsckidx¶ÔÓ¦µÄmqtt clientÔÚtclientsÖĞµÄË÷Òı
-]]
-local function getclient(sckidx)
-	for k,v in pairs(tclients) do
-		if v.sckidx==sckidx then return k end
-	end
+local function unpack(s)
+    if #s < 2 then return end
+    log.debug("mqtt.unpack", #s, string.toHex(string.sub(s, 1, 50)))
+    
+    -- read remaining length
+    local len = 0
+    local multiplier = 1
+    local pos = 2
+    
+    repeat
+        if pos > #s then return end
+        local digit = string.byte(s, pos)
+        len = len + ((digit % 128) * multiplier)
+        multiplier = multiplier * 128
+        pos = pos + 1
+    until digit < 128
+    
+    if #s < len + pos - 1 then return end
+    
+    local header = string.byte(s, 1)
+    
+    local packet = {id = (header - (header % 16)) / 16, dup = ((header % 16) - ((header % 16) % 8)) / 8, qos = bit.band(header, 0x06) / 2, retain = bit.band(header, 0x01)}
+    local nextpos
+    
+    if packet.id == CONNACK then
+        nextpos, packet.ackFlag, packet.rc = pack.unpack(s, "bb", pos)
+    elseif packet.id == PUBLISH then
+        nextpos, packet.topic = pack.unpack(s, ">P", pos)
+        if packet.qos > 0 then
+            nextpos, packet.packetId = pack.unpack(s, ">H", nextpos)
+        end
+        packet.payload = string.sub(s, nextpos, pos + len - 1)
+    elseif packet.id ~= PINGRESP then
+        if len >= 2 then
+            nextpos, packet.packetId = pack.unpack(s, ">H", pos)
+        else
+            packet.packetId = 0
+        end
+    end
+    
+    return packet, pos + len
 end
 
---[[
-º¯ÊıÃû£ºmqttconncb
-¹¦ÄÜ  £º·¢ËÍMQTT CONNECT±¨ÎÄºóµÄÒì²½»Øµ÷º¯Êı
-²ÎÊı  £º
-		sckidx£ºsocket idx
-		result£º boolÀàĞÍ£¬·¢ËÍ½á¹û£¬trueÎª³É¹¦£¬ÆäËûÎªÊ§°Ü
-		tpara£ºtableÀàĞÍ£¬{key="MQTTCONN",val=CONNECT±¨ÎÄÊı¾İ}
-·µ»ØÖµ£ºÎŞ
-]]
-function mqttconncb(sckidx,result,tpara)
-	--°ÑMQTT CONNECT±¨ÎÄÊı¾İ±£´æÆğÀ´£¬Èç¹û³¬Ê±DUP_TIMEÃëÖĞÃ»ÓĞÊÕµ½CONNACK»òÕßCONNACK·µ»ØÊ§°Ü£¬Ôò»á×Ô¶¯ÖØ·¢CONNECT±¨ÎÄ
-	--ÖØ·¢µÄ´¥·¢¿ª¹ØÔÚmqttdup.luaÖĞ
-	mqttdup.ins(sckidx,tmqttpack["MQTTCONN"].mqttduptyp,tpara.val)
+local mqttc = {}
+mqttc.__index = mqttc
+
+--- åˆ›å»ºä¸€ä¸ªmqtt clientå®ä¾‹
+-- @string clientId
+-- @number[opt=300] keepAlive å¿ƒè·³é—´éš”(å•ä½ä¸ºç§’)ï¼Œé»˜è®¤300ç§’
+-- @string[opt=""] username ç”¨æˆ·åï¼Œç”¨æˆ·åä¸ºç©ºé…ç½®ä¸º""æˆ–è€…nil
+-- @string[opt=""] password å¯†ç ï¼Œå¯†ç ä¸ºç©ºé…ç½®ä¸º""æˆ–è€…nil
+-- @number[opt=1] cleanSession 1/0
+-- @table[opt=nil] will é—å˜±å‚æ•°ï¼Œæ ¼å¼ä¸º{qos=, retain=, topic=, payload=}
+-- @string[opt="3.1.1"] version MQTTç‰ˆæœ¬å·
+-- @return table mqttc clientå®ä¾‹
+-- @usage
+-- mqttc = mqtt.client("clientid-123")
+-- mqttc = mqtt.client("clientid-123",200)
+-- mqttc = mqtt.client("clientid-123",nil,"user","password")
+-- mqttc = mqtt.client("clientid-123",nil,"user","password",nil,nil,"3.1")
+function client(clientId, keepAlive, username, password, cleanSession, will, version)
+    local o = {}
+    local packetId = 1
+    
+    if will then
+        will.flag = 1
+    else
+        will = {flag = 0, qos = 0, retain = 0, topic = "", payload = ""}
+    end
+    
+    o.clientId = clientId
+    o.keepAlive = keepAlive or 300
+    o.username = username or ""
+    o.password = password or ""
+    o.cleanSession = cleanSession or 1
+    o.version = version or "3.1.1"
+    o.will = will
+    o.commandTimeout = CLIENT_COMMAND_TIMEOUT
+    o.cache = {}-- æ¥æ”¶åˆ°çš„mqttæ•°æ®åŒ…ç¼“å†²
+    o.inbuf = "" -- æœªå®Œæˆçš„æ•°æ®ç¼“å†²
+    o.connected = false
+    o.getNextPacketId = function()
+        packetId = packetId == 65535 and 1 or (packetId + 1)
+        return packetId
+    end
+    o.lastOTime = 0
+    
+    setmetatable(o, mqttc)
+    
+    return o
 end
 
---[[
-º¯ÊıÃû£ºmqttconndata
-¹¦ÄÜ  £º×é°üMQTT CONNECT±¨ÎÄÊı¾İ
-²ÎÊı  £º
-		sckidx£ºsocket idx
-·µ»ØÖµ£ºCONNECT±¨ÎÄÊı¾İºÍ±¨ÎÄ²ÎÊı
-]]
-function mqttconndata(sckidx)
-	local mqttclientidx = getclient(sckidx)
-	return pack(tclients[mqttclientidx].mqttver,
-				CONNECT,
-				tclients[mqttclientidx].keepalive,
-				tclients[mqttclientidx].clientid,
-				{
-					flg=tclients[mqttclientidx].willflg or 0,
-					qos=tclients[mqttclientidx].willqos or 0,
-					retain=tclients[mqttclientidx].willretain or 0,
-					topic=tclients[mqttclientidx].willtopic or "",
-					payload=tclients[mqttclientidx].willpayload or "",
-				},
-				tclients[mqttclientidx].user,
-				tclients[mqttclientidx].password,
-				tclients[mqttclientidx].cleansession or 1)
+-- æ£€æµ‹æ˜¯å¦éœ€è¦å‘é€å¿ƒè·³åŒ…
+function mqttc:checkKeepAlive()
+    if self.keepAlive == 0 then return true end
+    if os.time() - self.lastOTime >= self.keepAlive then
+        if not self:write(packZeroData(PINGREQ)) then
+            log.info("mqtt.client:checkKeepAlive", "pingreq send fail")
+            return false
+        end
+    end
+    return true
 end
 
---[[
-º¯ÊıÃû£ºmqttsubcb
-¹¦ÄÜ  £º·¢ËÍSUBSCRIBE±¨ÎÄºóµÄÒì²½»Øµ÷º¯Êı
-²ÎÊı  £º
-		sckidx£ºsocket idx
-		result£º boolÀàĞÍ£¬·¢ËÍ½á¹û£¬trueÎª³É¹¦£¬ÆäËûÎªÊ§°Ü
-		tpara£ºtableÀàĞÍ£¬{key="MQTTSUB", val=para, usertag=usertag, ackcb=ackcb}
-·µ»ØÖµ£ºÎŞ
-]]
-local function mqttsubcb(sckidx,result,tpara)
-	--ÖØĞÂ·â×°MQTT SUBSCRIBE±¨ÎÄ£¬ÖØ¸´±êÖ¾ÉèÎªtrue£¬ĞòÁĞºÅºÍtopic¶¼ÊÇÓÃÔ­Ê¼Öµ£¬Êı¾İ±£´æÆğÀ´£¬Èç¹û³¬Ê±DUP_TIMEÃëÖĞÃ»ÓĞÊÕµ½SUBACK£¬Ôò»á×Ô¶¯ÖØ·¢SUBSCRIBE±¨ÎÄ
-	--ÖØ·¢µÄ´¥·¢¿ª¹ØÔÚmqttdup.luaÖĞ
-	mqttdup.ins(sckidx,tpara.key,pack(tclients[getclient(sckidx)].mqttver,SUBSCRIBE,tpara.val),tpara.val.seq,tpara.ackcb,tpara.usertag)
+-- å‘é€mqttæ•°æ®
+function mqttc:write(data)
+    log.debug("mqtt.client:write", string.toHex(string.sub(data, 1, 50)))
+    local r = self.io:send(data)
+    if r then self.lastOTime = os.time() end
+    return r
 end
 
---[[
-º¯ÊıÃû£ºmqttunsubcb
-¹¦ÄÜ  £º·¢ËÍUNSUBSCRIBE±¨ÎÄºóµÄÒì²½»Øµ÷º¯Êı
-²ÎÊı  £º
-		sckidx£ºsocket idx
-		result£º boolÀàĞÍ£¬·¢ËÍ½á¹û£¬trueÎª³É¹¦£¬ÆäËûÎªÊ§°Ü
-		tpara£ºtableÀàĞÍ£¬{key="MQTTUNSUB", val=para, usertag=usertag, ackcb=ackcb}
-·µ»ØÖµ£ºÎŞ
-]]
-local function mqttunsubcb(sckidx,result,tpara)
-	--ÖØĞÂ·â×°MQTT UNSUBSCRIBE±¨ÎÄ£¬ÖØ¸´±êÖ¾ÉèÎªtrue£¬ĞòÁĞºÅºÍtopic¶¼ÊÇÓÃÔ­Ê¼Öµ£¬Êı¾İ±£´æÆğÀ´£¬Èç¹û³¬Ê±DUP_TIMEÃëÖĞÃ»ÓĞÊÕµ½UNSUBACK£¬Ôò»á×Ô¶¯ÖØ·¢UNSUBSCRIBE±¨ÎÄ
-	--ÖØ·¢µÄ´¥·¢¿ª¹ØÔÚmqttdup.luaÖĞ
-	mqttdup.ins(sckidx,tpara.key,pack(tclients[getclient(sckidx)].mqttver,UNSUBSCRIBE,tpara.val),tpara.val.seq,tpara.ackcb,tpara.usertag)
+-- æ¥æ”¶mqttæ•°æ®åŒ…
+function mqttc:read(timeout, msg)
+    if not self:checkKeepAlive() then return false end
+    
+    -- å¤„ç†ä¹‹å‰ç¼“å†²çš„æ•°æ®
+    local packet, nextpos = unpack(self.inbuf)
+    if packet then
+        self.inbuf = string.sub(self.inbuf, nextpos)
+        return true, packet
+    end
+    
+    while true do
+        local recvTimeout
+        
+        if self.keepAlive == 0 then
+            recvTimeout = timeout
+        else
+            local kaTimeout = (self.keepAlive - (os.time() - self.lastOTime)) * 1000
+            recvTimeout = kaTimeout > timeout and timeout or kaTimeout
+        end
+        
+        local r, s, p = self.io:recv(recvTimeout == 0 and 5 or recvTimeout, msg)
+        if r then
+            self.inbuf = self.inbuf .. s
+        elseif s == "timeout" then -- è¶…æ—¶ï¼Œåˆ¤æ–­æ˜¯å¦éœ€è¦å‘é€å¿ƒè·³åŒ…
+            if not self:checkKeepAlive() then
+                return false
+            elseif timeout <= recvTimeout then
+                return false, "timeout"
+            else
+                timeout = timeout - recvTimeout
+            end
+        else -- å…¶ä»–é”™è¯¯ç›´æ¥è¿”å›
+            return r, s, p
+        end
+        local packet, nextpos = unpack(self.inbuf)
+        if packet then
+            --self.lastIOTime = os.time()
+            self.inbuf = string.sub(self.inbuf, nextpos)
+            if packet.id ~= PINGRESP then
+                return true, packet
+            end
+        end
+    end
 end
 
---[[
-º¯ÊıÃû£ºmqttpubcb
-¹¦ÄÜ  £º·¢ËÍPUBLISH±¨ÎÄºóµÄÒì²½»Øµ÷º¯Êı
-²ÎÊı  £º
-		sckidx£ºsocket idx
-		result£º boolÀàĞÍ£¬·¢ËÍ½á¹û£¬trueÎª³É¹¦£¬ÆäËûÎªÊ§°Ü
-		tpara£ºtableÀàĞÍ£¬{key="MQTTPUB", val=para, qos=qos, usertag=usertag, ackcb=ackcb}
-·µ»ØÖµ£ºÎŞ
-]]
-local function mqttpubcb(sckidx,result,tpara)
-	if tpara.qos==0 then
-		if tpara.ackcb then tpara.ackcb(tpara.usertag,result) end
-	elseif tpara.qos==1 then
-		--ÖØĞÂ·â×°MQTT PUBLISH±¨ÎÄ£¬ÖØ¸´±êÖ¾ÉèÎªtrue£¬ĞòÁĞºÅ¡¢topic¡¢payload¶¼ÊÇÓÃÔ­Ê¼Öµ£¬Êı¾İ±£´æÆğÀ´£¬Èç¹û³¬Ê±DUP_TIMEÃëÖĞÃ»ÓĞÊÕµ½PUBACK£¬Ôò»á×Ô¶¯ÖØ·¢PUBLISH±¨ÎÄ
-		--ÖØ·¢µÄ´¥·¢¿ª¹ØÔÚmqttdup.luaÖĞ
-		mqttdup.ins(sckidx,tpara.key,pack(tclients[getclient(sckidx)].mqttver,PUBLISH,tpara.val),tpara.val.seq,tpara.ackcb,tpara.usertag)
-	end
+-- ç­‰å¾…æ¥æ”¶æŒ‡å®šçš„mqttæ¶ˆæ¯
+function mqttc:waitfor(id, timeout, msg)
+    for index, packet in ipairs(self.cache) do
+        if packet.id == id then
+            return true, table.remove(self.cache, index)
+        end
+    end
+    
+    while true do
+        local insertCache = true
+        local r, data, param = self:read(timeout, msg)
+        if r then
+            if data.id == PUBLISH then
+                if data.qos > 0 then
+                    if not self:write(packACK(data.qos == 1 and PUBACK or PUBREC, 0, data.packetId)) then
+                        log.info("mqtt.client:waitfor", "send publish ack failed", data.qos)
+                        return false
+                    end
+                end
+            elseif data.id == PUBREC or data.id == PUBREL then
+                if not self:write(packACK(data.id == PUBREC and PUBREL or PUBCOMP, 0, data.packetId)) then
+                    log.info("mqtt.client:waitfor", "send ack fail", data.id == PUBREC and "PUBREC" or "PUBCOMP")
+                    return false
+                end
+                insertCache = false
+            end
+            
+            if data.id == id then
+                return true, data
+            end
+            if insertCache then table.insert(self.cache, data) end
+        else
+            return false, data, param
+        end
+    end
 end
 
---[[
-º¯ÊıÃû£ºmqttdiscb
-¹¦ÄÜ  £º·¢ËÍMQTT DICONNECT±¨ÎÄºóµÄÒì²½»Øµ÷º¯Êı
-²ÎÊı  £º
-		sckidx£ºsocket idx
-		result£º boolÀàĞÍ£¬·¢ËÍ½á¹û£¬trueÎª³É¹¦£¬ÆäËûÎªÊ§°Ü
-		tpara£ºtableÀàĞÍ£¬{key="MQTTDISC", val=data, usertag=usrtag}
-·µ»ØÖµ£ºÎŞ
-]]
-function mqttdiscb(sckidx,result,tpara)
-	--¹Ø±ÕsocketÁ¬½Ó
-	tclients[getclient(sckidx)].discing = true
-	socket.disconnect(sckidx,tpara.usertag)
+--- è¿æ¥mqttæœåŠ¡å™¨
+-- @string host æœåŠ¡å™¨åœ°å€
+-- @param port stringæˆ–è€…numberç±»å‹ï¼ŒæœåŠ¡å™¨ç«¯å£
+-- @string[opt="tcp"] transport "tcp"æˆ–è€…"tcp_ssl"
+-- @table[opt=nil] certï¼Œtableæˆ–è€…nilç±»å‹ï¼Œsslè¯ä¹¦ï¼Œå½“transportä¸º"tcp_ssl"æ—¶ï¼Œæ­¤å‚æ•°æ‰æœ‰æ„ä¹‰ã€‚certæ ¼å¼å¦‚ä¸‹ï¼š
+-- {
+--     caCert = "ca.crt", --CAè¯ä¹¦æ–‡ä»¶(Base64ç¼–ç  X.509æ ¼å¼)ï¼Œå¦‚æœå­˜åœ¨æ­¤å‚æ•°ï¼Œåˆ™è¡¨ç¤ºå®¢æˆ·ç«¯ä¼šå¯¹æœåŠ¡å™¨çš„è¯ä¹¦è¿›è¡Œæ ¡éªŒï¼›ä¸å­˜åœ¨åˆ™ä¸æ ¡éªŒ
+--     clientCert = "client.crt", --å®¢æˆ·ç«¯è¯ä¹¦æ–‡ä»¶(Base64ç¼–ç  X.509æ ¼å¼)ï¼ŒæœåŠ¡å™¨å¯¹å®¢æˆ·ç«¯çš„è¯ä¹¦è¿›è¡Œæ ¡éªŒæ—¶ä¼šç”¨åˆ°æ­¤å‚æ•°
+--     clientKey = "client.key", --å®¢æˆ·ç«¯ç§é’¥æ–‡ä»¶(Base64ç¼–ç  X.509æ ¼å¼)
+--     clientPassword = "123456", --å®¢æˆ·ç«¯è¯ä¹¦æ–‡ä»¶å¯†ç [å¯é€‰]
+-- }
+-- @number timeout, é“¾æ¥æœåŠ¡å™¨æœ€é•¿è¶…æ—¶æ—¶é—´
+-- @return result trueè¡¨ç¤ºæˆåŠŸï¼Œfalseæˆ–è€…nilè¡¨ç¤ºå¤±è´¥
+-- @usage mqttc = mqtt.client("clientid-123", nil, nil, false); mqttc:connect("mqttserver.com", 1883, "tcp", 5)
+function mqttc:connect(host, port, transport, cert, timeout)
+    if self.connected then
+        log.info("mqtt.client:connect", "has connected")
+        return false
+    end
+    
+    if self.io then
+        self.io:close()
+        self.io = nil
+    end
+    
+    if transport and transport ~= "tcp" and transport ~= "tcp_ssl" then
+        log.info("mqtt.client:connect", "invalid transport", transport)
+        return false
+    end
+    
+    self.io = socket.tcp(transport == "tcp_ssl" or type(cert) == "table", cert)
+    
+    if not self.io:connect(host, port, timeout) then
+        log.info("mqtt.client:connect", "connect host fail")
+        return false
+    end
+    
+    if not self:write(packCONNECT(self.clientId, self.keepAlive, self.username, self.password, self.cleanSession, self.will, self.version)) then
+        log.info("mqtt.client:connect", "send fail")
+        return false
+    end
+    
+    local r, packet = self:waitfor(CONNACK, self.commandTimeout)
+    if not r or packet.rc ~= 0 then
+        log.info("mqtt.client:connect", "connack error", r and packet.rc or -1)
+        return false
+    end
+    
+    self.connected = true
+    
+    return true
 end
 
---[[
-º¯ÊıÃû£ºmqttdiscdata
-¹¦ÄÜ  £º×é°üMQTT DISCONNECT±¨ÎÄÊı¾İ
-²ÎÊı  £º
-		sckidx£ºsocket idx
-·µ»ØÖµ£ºDISCONNECT±¨ÎÄÊı¾İºÍ±¨ÎÄ²ÎÊı
-]]
-function mqttdiscdata(sckidx)
-	return pack(tclients[getclient(sckidx)].mqttver,DISCONNECT)
+--- è®¢é˜…ä¸»é¢˜
+-- @param topicï¼Œstringæˆ–è€…tableç±»å‹ï¼Œä¸€ä¸ªä¸»é¢˜æ—¶ä¸ºstringç±»å‹ï¼Œå¤šä¸ªä¸»é¢˜æ—¶ä¸ºtableç±»å‹ï¼Œä¸»é¢˜å†…å®¹ä¸ºUTF8ç¼–ç 
+-- @param[opt=0] qosï¼Œnumberæˆ–è€…nilï¼Œtopicä¸ºä¸€ä¸ªä¸»é¢˜æ—¶ï¼Œqosä¸ºnumberç±»å‹(0/1/2ï¼Œé»˜è®¤0)ï¼›topicä¸ºå¤šä¸ªä¸»é¢˜æ—¶ï¼Œqosä¸ºnil
+-- @return bool trueè¡¨ç¤ºæˆåŠŸï¼Œfalseæˆ–è€…nilè¡¨ç¤ºå¤±è´¥
+-- @usage
+-- mqttc:subscribe("/abc", 0) -- subscribe topic "/abc" with qos = 0
+-- mqttc:subscribe({["/topic1"] = 0, ["/topic2"] = 1, ["/topic3"] = 2}) -- subscribe multi topic
+function mqttc:subscribe(topic, qos)
+    if not self.connected then
+        log.info("mqtt.client:subscribe", "not connected")
+        return false
+    end
+    
+    local topics
+    if type(topic) == "string" then
+        topics = {[topic] = qos and qos or 0}
+    else
+        topics = topic
+    end
+    
+    if not self:write(packSUBSCRIBE(0, self.getNextPacketId(), topics)) then
+        log.info("mqtt.client:subscribe", "send failed")
+        return false
+    end
+    
+    if not self:waitfor(SUBACK, self.commandTimeout) then
+        log.info("mqtt.client:subscribe", "wait ack failed")
+        return false
+    end
+    
+    return true
 end
 
---[[
-º¯ÊıÃû£ºdisconnect
-¹¦ÄÜ  £º·¢ËÍMQTT DISCONNECT±¨ÎÄ
-²ÎÊı  £º
-		sckidx£ºsocket idx
-		usrtag£ºÓÃ»§×Ô¶¨Òå±ê¼Ç
-·µ»ØÖµ£ºtrue±íÊ¾·¢ÆğÁË¶¯×÷£¬nil±íÊ¾Ã»ÓĞ·¢Æğ
-]]
-local function disconnect(sckidx,usrtag)
-	return mqttsnd(sckidx,"MQTTDISC",usrtag)
+--- å–æ¶ˆè®¢é˜…ä¸»é¢˜
+-- @param topicï¼Œstringæˆ–è€…tableç±»å‹ï¼Œä¸€ä¸ªä¸»é¢˜æ—¶ä¸ºstringç±»å‹ï¼Œå¤šä¸ªä¸»é¢˜æ—¶ä¸ºtableç±»å‹ï¼Œä¸»é¢˜å†…å®¹ä¸ºUTF8ç¼–ç 
+-- @return bool trueè¡¨ç¤ºæˆåŠŸï¼Œfalseæˆ–è€…nilè¡¨ç¤ºå¤±è´¥
+-- @usage
+-- mqttc:unsubscribe("/abc") -- unsubscribe topic "/abc"
+-- mqttc:unsubscribe({"/topic1", "/topic2", "/topic3"}) -- unsubscribe multi topic
+function mqttc:unsubscribe(topic)
+    if not self.connected then
+        log.info("mqtt.client:unsubscribe", "not connected")
+        return false
+    end
+    
+    local topics
+    if type(topic) == "string" then
+        topics = {topic}
+    else
+        topics = topic
+    end
+    
+    if not self:write(packUNSUBSCRIBE(0, self.getNextPacketId(), topics)) then
+        log.info("mqtt.client:unsubscribe", "send failed")
+        return false
+    end
+    
+    if not self:waitfor(UNSUBACK, self.commandTimeout) then
+        log.info("mqtt.client:unsubscribe", "wait ack failed")
+        return false
+    end
+    
+    return true
 end
 
---[[
-º¯ÊıÃû£ºmqttpingreqdata
-¹¦ÄÜ  £º×é°üMQTT PINGREQ±¨ÎÄÊı¾İ
-²ÎÊı  £º
-		sckidx£ºsocket idx
-·µ»ØÖµ£ºPINGREQ±¨ÎÄÊı¾İºÍ±¨ÎÄ²ÎÊı
-]]
-function mqttpingreqdata(sckidx)
-	return pack(tclients[getclient(sckidx)].mqttver,PINGREQ)
+--- å‘å¸ƒä¸€æ¡æ¶ˆæ¯
+-- @string topic UTF8ç¼–ç çš„å­—ç¬¦ä¸²
+-- @string payload ç”¨æˆ·è‡ªå·±æ§åˆ¶payloadçš„ç¼–ç ï¼Œmqtt.luaä¸ä¼šå¯¹payloadåšä»»ä½•ç¼–ç è½¬æ¢
+-- @number[opt=0] qos 0/1/2, default 0
+-- @number[opt=0] retain 0æˆ–è€…1
+-- @return bool å‘å¸ƒæˆåŠŸè¿”å›trueï¼Œå¤±è´¥è¿”å›false
+-- @usage
+-- mqttc = mqtt.client("clientid-123", nil, nil, false)
+-- mqttc:connect("mqttserver.com", 1883, "tcp")
+-- mqttc:publish("/topic", "publish from luat mqtt client", 0)
+function mqttc:publish(topic, payload, qos, retain)
+    if not self.connected then
+        log.info("mqtt.client:publish", "not connected")
+        return false
+    end
+    
+    qos = qos or 0
+    retain = retain or 0
+    
+    if not self:write(packPUBLISH(0, qos, retain, qos > 0 and self.getNextPacketId() or 0, topic, payload)) then
+        log.info("mqtt.client:publish", "socket send failed")
+        return false
+    end
+    
+    if qos == 0 then return true end
+    
+    if not self:waitfor(qos == 1 and PUBACK or PUBCOMP, self.commandTimeout) then
+        log.warn("mqtt.client:publish", "wait ack timeout")
+        return false
+    end
+    
+    return true
 end
 
---[[
-º¯ÊıÃû£ºpingreq
-¹¦ÄÜ  £º·¢ËÍMQTT PINGREQ±¨ÎÄ
-²ÎÊı  £º
-		sckidx£ºsocket idx
-·µ»ØÖµ£ºÎŞ
-]]
-local function pingreq(sckidx)
-	local mqttclientidx = getclient(sckidx)
-	mqttsnd(sckidx,"MQTTPINGREQ")
-	if not sys.timer_is_active(disconnect,sckidx) then
-		--Æô¶¯¶¨Ê±Æ÷£ºÈç¹û±£»îÊ±¼ä+30ÃëÄÚ£¬Ã»ÓĞÊÕµ½pingrsp£¬Ôò·¢ËÍMQTT DISCONNECT±¨ÎÄ
-		sys.timer_start(disconnect,(tclients[mqttclientidx].keepalive+30)*1000,sckidx)
-	end
+--- æ¥æ”¶æ¶ˆæ¯
+-- @number timeout æ¥æ”¶è¶…æ—¶æ—¶é—´ï¼Œå•ä½æ¯«ç§’
+-- @string[opt=nil] msg å¯é€‰å‚æ•°ï¼Œæ§åˆ¶socketæ‰€åœ¨çš„çº¿ç¨‹é€€å‡ºrecvé˜»å¡çŠ¶æ€
+-- @return result æ•°æ®æ¥æ”¶ç»“æœï¼Œtrueè¡¨ç¤ºæˆåŠŸï¼Œfalseè¡¨ç¤ºå¤±è´¥
+-- @return data å¦‚æœresultä¸ºtrueï¼Œè¡¨ç¤ºæœåŠ¡å™¨å‘è¿‡æ¥çš„åŒ…ï¼›å¦‚æœresultä¸ºfalseï¼Œè¡¨ç¤ºé”™è¯¯ä¿¡æ¯ï¼Œè¶…æ—¶å¤±è´¥æ—¶ä¸º"timeout"
+-- @return param msgæ§åˆ¶é€€å‡ºæ—¶ï¼Œè¿”å›msgçš„å­—ç¬¦ä¸²
+-- @usage
+-- true, packet = mqttc:receive(2000)
+-- false, error_message = mqttc:receive(2000)
+-- false, msg, para = mqttc:receive(2000)
+function mqttc:receive(timeout, msg)
+    if not self.connected then
+        log.info("mqtt.client:receive", "not connected")
+        return false
+    end
+    
+    return self:waitfor(PUBLISH, timeout, msg)
 end
 
---[[
-º¯ÊıÃû£ºsnd
-¹¦ÄÜ  £ºµ÷ÓÃ·¢ËÍ½Ó¿Ú·¢ËÍÊı¾İ
-²ÎÊı  £º
-		sckidx£ºsocket idx
-        data£º·¢ËÍµÄÊı¾İ£¬ÔÚ·¢ËÍ½á¹ûÊÂ¼ş´¦Àíº¯ÊıntfyÖĞ£¬»á¸³Öµµ½item.dataÖĞ
-		para£º·¢ËÍµÄ²ÎÊı£¬ÔÚ·¢ËÍ½á¹ûÊÂ¼ş´¦Àíº¯ÊıntfyÖĞ£¬»á¸³Öµµ½item.paraÖĞ
-·µ»ØÖµ£ºµ÷ÓÃ·¢ËÍ½Ó¿ÚµÄ½á¹û£¨²¢²»ÊÇÊı¾İ·¢ËÍÊÇ·ñ³É¹¦µÄ½á¹û£¬Êı¾İ·¢ËÍÊÇ·ñ³É¹¦µÄ½á¹ûÔÚntfyÖĞµÄSENDÊÂ¼şÖĞÍ¨Öª£©£¬trueÎª³É¹¦£¬ÆäËûÎªÊ§°Ü
-]]
-function snd(sckidx,data,para)
-	return socket.send(sckidx,data,para)
-end
-
---mqttÓ¦ÓÃ±¨ÎÄ±í
-tmqttpack =
-{
-	MQTTCONN = {sndpara="MQTTCONN",mqttyp=CONNECT,mqttduptyp="CONN",mqttdatafnc=mqttconndata,sndcb=mqttconncb},
-	MQTTPINGREQ = {sndpara="MQTTPINGREQ",mqttyp=PINGREQ,mqttdatafnc=mqttpingreqdata},
-	MQTTDISC = {sndpara="MQTTDISC",mqttyp=DISCONNECT,mqttdatafnc=mqttdiscdata,sndcb=mqttdiscb},
-}
-
-local function getidbysndpara(para)
-	for k,v in pairs(tmqttpack) do
-		if v.sndpara==para then return k end
-	end
-end
-
---[[
-º¯ÊıÃû£ºmqttsnd
-¹¦ÄÜ  £ºMQTT±¨ÎÄ·¢ËÍ×Ü½Ó¿Ú£¬¸ù¾İ±¨ÎÄÀàĞÍ£¬ÔÚmqttÓ¦ÓÃ±¨ÎÄ±íÖĞÕÒµ½×é°üº¯Êı£¬È»ºó·¢ËÍÊı¾İ
-²ÎÊı  £º
-		sckidx£ºsocket idx
-        typ£º±¨ÎÄÀàĞÍ
-		usrtag£ºÓÃ»§×Ô¶¨Òå±ê¼Ç
-·µ»ØÖµ£ºtrue±íÊ¾·¢ÆğÁË¶¯×÷£¬nil±íÊ¾Ã»ÓĞ·¢Æğ
-]]
-function mqttsnd(sckidx,typ,usrtag)
-	if not tmqttpack[typ] then print("mqttsnd typ error",typ) return end
-	local mqttyp = tmqttpack[typ].mqttyp
-	local dat,para = tmqttpack[typ].mqttdatafnc(sckidx)
-
-	if mqttyp==CONNECT then
-		if tmqttpack[typ].mqttduptyp then mqttdup.rmv(sckidx,tmqttpack[typ].mqttduptyp) end
-		if not snd(sckidx,dat,{key=tmqttpack[typ].sndpara,val=dat}) and tmqttpack[typ].sndcb then
-			tmqttpack[typ].sndcb(sckidx,false,{key=tmqttpack[typ].sndpara,val=dat})
-		end
-	elseif mqttyp==PINGREQ then
-		snd(sckidx,dat,{key=tmqttpack[typ].sndpara})
-	elseif mqttyp==DISCONNECT then
-		if not snd(sckidx,dat,{key=tmqttpack[typ].sndpara,usertag=usrtag}) and tmqttpack[typ].sndcb then
-			tmqttpack[typ].sndcb(sckidx,false,{key=tmqttpack[typ].sndpara,usertag=usrtag})
-		end
-	end
-
-	return true
-end
-
---[[
-º¯ÊıÃû£ºreconn
-¹¦ÄÜ  £ºsocketÖØÁ¬ºóÌ¨´¦Àí
-        Ò»¸öÁ¬½ÓÖÜÆÚÄÚµÄ¶¯×÷£ºÈç¹ûÁ¬½ÓºóÌ¨Ê§°Ü£¬»á³¢ÊÔÖØÁ¬£¬ÖØÁ¬¼ä¸ôÎªRECONN_PERIODÃë£¬×î¶àÖØÁ¬RECONN_MAX_CNT´Î
-        Èç¹ûÒ»¸öÁ¬½ÓÖÜÆÚÄÚ¶¼Ã»ÓĞÁ¬½Ó³É¹¦£¬ÔòµÈ´ıRECONN_CYCLE_PERIODÃëºó£¬ÖØĞÂ·¢ÆğÒ»¸öÁ¬½ÓÖÜÆÚ
-        Èç¹ûÁ¬ĞøRECONN_CYCLE_MAX_CNT´ÎµÄÁ¬½ÓÖÜÆÚ¶¼Ã»ÓĞÁ¬½Ó³É¹¦£¬ÔòÖØÆôÈí¼ş
-²ÎÊı  £º
-		sckidx£ºsocket idx
-·µ»ØÖµ£ºÎŞ
-]]
-local function reconn(sckidx)
-	local mqttclientidx = getclient(sckidx)
-	print("reconn",mqttclientidx,tclients[mqttclientidx].sckreconncnt,tclients[mqttclientidx].sckconning,tclients[mqttclientidx].sckreconncyclecnt)
-	--sckconning±íÊ¾ÕıÔÚ³¢ÊÔÁ¬½ÓºóÌ¨£¬Ò»¶¨ÒªÅĞ¶Ï´Ë±äÁ¿£¬·ñÔòÓĞ¿ÉÄÜ·¢Æğ²»±ØÒªµÄÖØÁ¬£¬µ¼ÖÂsckreconncntÔö¼Ó£¬Êµ¼ÊµÄÖØÁ¬´ÎÊı¼õÉÙ
-	if tclients[mqttclientidx].sckconning then return end
-	--Ò»¸öÁ¬½ÓÖÜÆÚÄÚµÄÖØÁ¬
-	if tclients[mqttclientidx].sckreconncnt < RECONN_MAX_CNT then
-		tclients[mqttclientidx].sckreconncnt = tclients[mqttclientidx].sckreconncnt+1
-		socket.disconnect(sckidx)
-		tclients[mqttclientidx].sckconning = true
-	--Ò»¸öÁ¬½ÓÖÜÆÚµÄÖØÁ¬¶¼Ê§°Ü
-	else
-		tclients[mqttclientidx].sckreconncnt,tclients[mqttclientidx].sckreconncyclecnt = 0,tclients[mqttclientidx].sckreconncyclecnt+1
-		if tclients[mqttclientidx].sckreconncyclecnt >= RECONN_CYCLE_MAX_CNT then
-			if tclients[mqttclientidx].sckerrcb then
-				tclients[mqttclientidx].sckreconncnt=0
-				tclients[mqttclientidx].sckreconncyclecnt=0
-				tclients[mqttclientidx].sckerrcb("CONNECT")
-			else
-				sys.restart("connect fail")
-			end
-		else
-			link.shut()
-		end
-	end
-end
-
-local function connectitem(mqttclientidx)
-	connect(tclients[mqttclientidx].sckidx,tclients[mqttclientidx].prot,tclients[mqttclientidx].host,tclients[mqttclientidx].port)
-end
-
---[[
-º¯ÊıÃû£ºntfy
-¹¦ÄÜ  £ºsocket×´Ì¬µÄ´¦Àíº¯Êı
-²ÎÊı  £º
-        idx£ºnumberÀàĞÍ£¬socketÖĞÎ¬»¤µÄsocket idx£¬¸úµ÷ÓÃsocket.connectÊ±´«ÈëµÄµÚÒ»¸ö²ÎÊıÏàÍ¬£¬³ÌĞò¿ÉÒÔºöÂÔ²»´¦Àí
-        evt£ºstringÀàĞÍ£¬ÏûÏ¢ÊÂ¼şÀàĞÍ
-		result£º boolÀàĞÍ£¬ÏûÏ¢ÊÂ¼ş½á¹û£¬trueÎª³É¹¦£¬ÆäËûÎªÊ§°Ü
-		item£ºtableÀàĞÍ£¬{data=,para=}£¬ÏûÏ¢»Ø´«µÄ²ÎÊıºÍÊı¾İ£¬Ä¿Ç°Ö»ÊÇÔÚSENDÀàĞÍµÄÊÂ¼şÖĞÓÃµ½ÁË´Ë²ÎÊı£¬ÀıÈçµ÷ÓÃsocket.sendÊ±´«ÈëµÄµÚ2¸öºÍµÚ3¸ö²ÎÊı·Ö±ğÎªdatºÍpar£¬Ôòitem={data=dat,para=par}
-·µ»ØÖµ£ºÎŞ
-]]
-function ntfy(idx,evt,result,item)
-	local mqttclientidx = getclient(idx)
-	print("ntfy",evt,result,item)
-	--Á¬½Ó½á¹û£¨µ÷ÓÃsocket.connectºóµÄÒì²½ÊÂ¼ş£©
-	if evt == "CONNECT" then
-		tclients[mqttclientidx].sckconning = false
-		--Á¬½Ó³É¹¦
-		if result then
-			tclients[mqttclientidx].sckconnected=true
-			tclients[mqttclientidx].sckreconncnt=0
-			tclients[mqttclientidx].sckreconncyclecnt=0
-			tclients[mqttclientidx].sckrcvs=""
-			--Í£Ö¹ÖØÁ¬¶¨Ê±Æ÷
-			sys.timer_stop(reconn,idx)
-			--·¢ËÍmqtt connectÇëÇó
-			mqttsnd(idx,"MQTTCONN")
-		--Á¬½ÓÊ§°Ü
-		else
-			--RECONN_PERIODÃëºóÖØÁ¬
-			sys.timer_start(reconn,RECONN_PERIOD*1000,idx)
-		end
-	--Êı¾İ·¢ËÍ½á¹û£¨µ÷ÓÃsocket.sendºóµÄÒì²½ÊÂ¼ş£©
-	elseif evt == "SEND" then
-		if not result then
-			socket.disconnect(idx)
-		else
-			if item.para then
-				if item.para.key=="MQTTPUB" then
-					mqttpubcb(idx,result,item.para)
-				elseif item.para.key=="MQTTSUB" then
-					mqttsubcb(idx,result,item.para)
-				elseif item.para.key=="MQTTUNSUB" then
-					mqttunsubcb(idx,result,item.para)
-				elseif item.para.key=="MQTTDUP" then
-					mqttdupcb(idx,result,item.data)
-				else
-					local id = getidbysndpara(item.para.key)
-					print("item.para",type(item.para) == "table",type(item.para) == "table" and item.para.typ or item.para,id)
-					if id and tmqttpack[id].sndcb then tmqttpack[id].sndcb(idx,result,item.para) end
-				end
-			end
-		end
-	--Á¬½Ó±»¶¯¶Ï¿ª
-	elseif evt == "STATE" and result == "CLOSED" then
-		sys.timer_stop(datinactive,idx)
-		sys.timer_stop(pingreq,idx)
-		mqttdup.rmvall(idx)
-		tclients[mqttclientidx].sckconnected=false
-		tclients[mqttclientidx].mqttconnected=false
-		tclients[mqttclientidx].sckrcvs=""
-		if tclients[mqttclientidx].discing then
-			if tclients[mqttclientidx].discb then tclients[mqttclientidx].discb() end
-			tclients[mqttclientidx].discing = false
-		else
-			sys.timer_start(connectitem,RECONN_PERIOD*1000,mqttclientidx)
-		end
-	--Á¬½ÓÖ÷¶¯¶Ï¿ª£¨µ÷ÓÃlink.shutºóµÄÒì²½ÊÂ¼ş£©
-	elseif evt == "STATE" and result == "SHUTED" then
-		sys.timer_stop(datinactive,idx)
-		sys.timer_stop(pingreq,idx)
-		mqttdup.rmvall(idx)
-		tclients[mqttclientidx].sckconnected=false
-		tclients[mqttclientidx].mqttconnected=false
-		tclients[mqttclientidx].sckrcvs=""
-		connectitem(mqttclientidx)
-	--Á¬½ÓÖ÷¶¯¶Ï¿ª£¨µ÷ÓÃsocket.disconnectºóµÄÒì²½ÊÂ¼ş£©
-	elseif evt == "DISCONNECT" then
-		sys.timer_stop(datinactive,idx)
-		sys.timer_stop(pingreq,idx)
-		mqttdup.rmvall(idx)
-		tclients[mqttclientidx].sckconnected=false
-		tclients[mqttclientidx].mqttconnected=false
-		tclients[mqttclientidx].sckrcvs=""
-		if item=="USER" then
-			if tclients[mqttclientidx].discb then tclients[mqttclientidx].discb() end
-			tclients[mqttclientidx].discing = false
-		else
-			connectitem(mqttclientidx)
-		end
-	--Á¬½ÓÖ÷¶¯¶Ï¿ª²¢ÇÒÏú»Ù£¨µ÷ÓÃsocket.closeºóµÄÒì²½ÊÂ¼ş£©
-	elseif evt == "CLOSE" then
-		sys.timer_stop(datinactive,idx)
-		sys.timer_stop(pingreq,idx)
-		mqttdup.rmvall(idx)
-		local cb = tclients[mqttclientidx].destroycb
-		table.remove(tclients,mqttclientidx)
-		if cb then cb() end
-	end
-	--ÆäËû´íÎó´¦Àí£¬¶Ï¿ªÊı¾İÁ´Â·£¬ÖØĞÂÁ¬½Ó
-	if smatch((type(result)=="string") and result or "","ERROR") then
-		socket.disconnect(idx)
-	end
-end
-
---[[
-º¯ÊıÃû£ºconnack
-¹¦ÄÜ  £º´¦Àí·şÎñÆ÷ÏÂ·¢µÄMQTT CONNACK±¨ÎÄ
-²ÎÊı  £º
-        sckidx£ºsocket idx
-		packet£º½âÎöºóµÄ±¨ÎÄ¸ñÊ½£¬tableÀàĞÍ{suc=ÊÇ·ñÁ¬½Ó³É¹¦}
-·µ»ØÖµ£ºÎŞ
-]]
-local function connack(sckidx,packet)
-	local mqttclientidx = getclient(sckidx)
-	print("connack",packet.suc)
-	if packet.suc then
-		tclients[mqttclientidx].mqttconnected = true
-		mqttdup.rmv(sckidx,tmqttpack["MQTTCONN"].mqttduptyp)
-		if tclients[mqttclientidx].connectedcb then tclients[mqttclientidx].connectedcb() end
-	else
-		if tclients[mqttclientidx].connecterrcb then tclients[mqttclientidx].connecterrcb(packet.reason) end
-	end
-end
-
---[[
-º¯ÊıÃû£ºsuback
-¹¦ÄÜ  £º´¦Àí·şÎñÆ÷ÏÂ·¢µÄMQTT SUBACK±¨ÎÄ
-²ÎÊı  £º
-        sckidx£ºsocket idx
-		packet£º½âÎöºóµÄ±¨ÎÄ¸ñÊ½£¬tableÀàĞÍ{seq=¶ÔÓ¦µÄSUBSCRIBE±¨ÎÄĞòÁĞºÅ}
-·µ»ØÖµ£ºÎŞ
-]]
-local function suback(sckidx,packet)
-	local mqttclientidx = getclient(sckidx)
-	local typ,cb,cbtag = mqttdup.getyp(sckidx,packet.seq)
-	print("suback",common.binstohexs(packet.seq))
-	mqttdup.rmv(sckidx,nil,nil,packet.seq)
-	if cb then cb(cbtag,true) end
-end
-
---[[
-º¯ÊıÃû£ºunsuback
-¹¦ÄÜ  £º´¦Àí·şÎñÆ÷ÏÂ·¢µÄMQTT UNSUBACK±¨ÎÄ
-²ÎÊı  £º
-        sckidx£ºsocket idx
-		packet£º½âÎöºóµÄ±¨ÎÄ¸ñÊ½£¬tableÀàĞÍ{seq=¶ÔÓ¦µÄUNSUBSCRIBE±¨ÎÄĞòÁĞºÅ}
-·µ»ØÖµ£ºÎŞ
-]]
-local function unsuback(sckidx,packet)
-	local mqttclientidx = getclient(sckidx)
-	local typ,cb,cbtag = mqttdup.getyp(sckidx,packet.seq)
-	print("unsuback",common.binstohexs(packet.seq))
-	mqttdup.rmv(sckidx,nil,nil,packet.seq)
-	if cb then cb(cbtag,true) end
-end
-
---[[
-º¯ÊıÃû£ºpuback
-¹¦ÄÜ  £º´¦Àí·şÎñÆ÷ÏÂ·¢µÄMQTT PUBACK±¨ÎÄ
-²ÎÊı  £º
-        sckidx£ºsocket idx
-		packet£º½âÎöºóµÄ±¨ÎÄ¸ñÊ½£¬tableÀàĞÍ{seq=¶ÔÓ¦µÄPUBLISH±¨ÎÄĞòÁĞºÅ}
-·µ»ØÖµ£ºÎŞ
-]]
-local function puback(sckidx,packet)
-	local mqttclientidx = getclient(sckidx)
-	local typ,cb,cbtag = mqttdup.getyp(sckidx,packet.seq)
-	print("puback",common.binstohexs(packet.seq),typ)
-	mqttdup.rmv(sckidx,nil,nil,packet.seq)
-	if cb then cb(cbtag,true) end
-end
-
---[[
-º¯ÊıÃû£ºsvrpublish
-¹¦ÄÜ  £º´¦Àí·şÎñÆ÷ÏÂ·¢µÄMQTT PUBLISH±¨ÎÄ
-²ÎÊı  £º
-        sckidx£ºsocket idx
-		mqttpacket£º½âÎöºóµÄ±¨ÎÄ¸ñÊ½£¬tableÀàĞÍ{qos=,topic,seq,payload}
-·µ»ØÖµ£ºÎŞ
-]]
-local function svrpublish(sckidx,mqttpacket)
-	local mqttclientidx = getclient(sckidx)
-	print("svrpublish",mqttpacket.topic,mqttpacket.seq,slen(mqttpacket.payload)>200 and slen(mqttpacket.payload) or mqttpacket.payload)
-	if mqttpacket.qos == 1 then snd(sckidx,pack(tclients[mqttclientidx].mqttver,PUBACK,mqttpacket.seq)) end
-	if tclients[mqttclientidx].evtcbs then
-		if tclients[mqttclientidx].evtcbs["MESSAGE"] then tclients[mqttclientidx].evtcbs["MESSAGE"](common.utf8togb2312(mqttpacket.topic),mqttpacket.payload,mqttpacket.qos) end
-	end
-end
-
---[[
-º¯ÊıÃû£ºpingrsp
-¹¦ÄÜ  £º´¦Àí·şÎñÆ÷ÏÂ·¢µÄMQTT PINGRSP±¨ÎÄ
-²ÎÊı  £º
-		sckidx£ºsocket idx
-·µ»ØÖµ£ºÎŞ
-]]
-local function pingrsp(sckidx)
-	sys.timer_stop(disconnect,sckidx)
-end
-
---·şÎñÆ÷ÏÂ·¢±¨ÎÄ´¦Àí±í
-mqttcmds = {
-	[CONNACK] = connack,
-	[SUBACK] = suback,
-	[UNSUBACK] = unsuback,
-	[PUBACK] = puback,
-	[PUBLISH] = svrpublish,
-	[PINGRSP] = pingrsp,
-}
-
---[[
-º¯ÊıÃû£ºdatinactive
-¹¦ÄÜ  £ºÊı¾İÍ¨ĞÅÒì³£´¦Àí
-²ÎÊı  £º
-		sckidx£ºsocket idx
-·µ»ØÖµ£ºÎŞ
-]]
-function datinactive(sckidx)
-	local mqttclientidx = getclient(sckidx)
-	if tclients[mqttclientidx].sckerrcb then
-		socket.disconnect(sckidx)
-		tclients[mqttclientidx].sckreconncnt=0
-		tclients[mqttclientidx].sckreconncyclecnt=0
-		tclients[mqttclientidx].sckerrcb("SVRNODATA")
-	else
-		sys.restart("SVRNODATA")
-	end
-end
-
---[[
-º¯ÊıÃû£ºcheckdatactive
-¹¦ÄÜ  £ºÖØĞÂ¿ªÊ¼¼ì²â¡°Êı¾İÍ¨ĞÅÊÇ·ñÒì³£¡±
-²ÎÊı  £º
-		sckidx£ºsocket idx
-·µ»ØÖµ£ºÎŞ
-]]
-local function checkdatactive(sckidx)
-	local mqttclientidx = getclient(sckidx)
-	sys.timer_start(datinactive,tclients[mqttclientidx].keepalive*1000*3+30000,sckidx) --3±¶±£»îÊ±¼ä+°ë·ÖÖÓ
-end
-
---[[
-º¯ÊıÃû£ºrcv
-¹¦ÄÜ  £ºsocket½ÓÊÕÊı¾İµÄ´¦Àíº¯Êı
-²ÎÊı  £º
-        idx £ºsocketÖĞÎ¬»¤µÄsocket idx£¬¸úµ÷ÓÃsocket.connectÊ±´«ÈëµÄµÚÒ»¸ö²ÎÊıÏàÍ¬£¬³ÌĞò¿ÉÒÔºöÂÔ²»´¦Àí
-        data£º½ÓÊÕµ½µÄÊı¾İ
-·µ»ØÖµ£ºÎŞ
-]]
-function rcv(idx,data)
-	local mqttclientidx = getclient(idx)
-	if not mqttclientidx or not tclients[mqttclientidx].sckconnected then return end
-	print("rcv",slen(data)>200 and slen(data) or common.binstohexs(data))
-	sys.timer_start(pingreq,(tclients[mqttclientidx].keepalive*1000-(tclients[mqttclientidx].keepalive*1000%2))/2,idx)
-	tclients[mqttclientidx].sckrcvs = tclients[mqttclientidx].sckrcvs..data
-	if slen(tclients[mqttclientidx].sckrcvs)>1024*10 then collectgarbage() end
-
-	local f,h,t = iscomplete(tclients[mqttclientidx].sckrcvs)
-
-	while f do
-		data = ssub(tclients[mqttclientidx].sckrcvs,h,t)
-		tclients[mqttclientidx].sckrcvs = ssub(tclients[mqttclientidx].sckrcvs,t+1,-1)
-		local packet = unpack(tclients[mqttclientidx].mqttver,data)
-		if packet and packet.typ and mqttcmds[packet.typ] then
-			mqttcmds[packet.typ](idx,packet)
-			if packet.typ ~= CONNACK and packet.typ ~= SUBACK and packet.typ ~= UNSUBACK then
-				checkdatactive(idx)
-			end
-		end
-		f,h,t = iscomplete(tclients[mqttclientidx].sckrcvs)
-	end
-end
-
-
---[[
-º¯ÊıÃû£ºconnect
-¹¦ÄÜ  £º´´½¨µ½ºóÌ¨·şÎñÆ÷µÄsocketÁ¬½Ó£»
-        Èç¹ûÊı¾İÍøÂçÒÑ¾­×¼±¸ºÃ£¬»áÀí½âÁ¬½ÓºóÌ¨£»·ñÔò£¬Á¬½ÓÇëÇó»á±»¹ÒÆğ£¬µÈÊı¾İÍøÂç×¼±¸¾ÍĞ÷ºó£¬×Ô¶¯È¥Á¬½ÓºóÌ¨
-		ntfy£ºsocket×´Ì¬µÄ´¦Àíº¯Êı
-		rcv£ºsocket½ÓÊÕÊı¾İµÄ´¦Àíº¯Êı
-²ÎÊı  £º
-		sckidx£ºsocket idx
-		prot£ºstringÀàĞÍ£¬´«Êä²ãĞ­Òé£¬½öÖ§³Ö"TCP"ºÍ"UDP"[±ØÑ¡]
-		host£ºstringÀàĞÍ£¬·şÎñÆ÷µØÖ·£¬Ö§³ÖÓòÃûºÍIPµØÖ·[±ØÑ¡]
-		port£ºnumberÀàĞÍ£¬·şÎñÆ÷¶Ë¿Ú[±ØÑ¡]
-·µ»ØÖµ£ºÎŞ
-]]
-function connect(sckidx,prot,host,port)
-	socket.connect(sckidx,prot,host,port,ntfy,rcv)
-	tclients[getclient(sckidx)].sckconning=true
-end
-
---[[
-º¯ÊıÃû£ºmqttdupcb
-¹¦ÄÜ  £ºmqttdupÖĞ´¥·¢µÄÖØ·¢±¨ÎÄ·¢ËÍºóµÄÒì²½»Øµ÷
-²ÎÊı  £º
-		sckidx£ºsocket idx
-		result£º boolÀàĞÍ£¬·¢ËÍ½á¹û£¬trueÎª³É¹¦£¬ÆäËûÎªÊ§°Ü
-		v£º±¨ÎÄÊı¾İ
-·µ»ØÖµ£ºÎŞ
-]]
-function mqttdupcb(sckidx,result,v)
-	mqttdup.rsm(sckidx,v)
-end
-
---[[
-º¯ÊıÃû£ºmqttdupind
-¹¦ÄÜ  £ºmqttdupÖĞ´¥·¢µÄÖØ·¢±¨ÎÄ´¦Àí
-²ÎÊı  £º
-		sckidx£ºsocket idx
-		s£º±¨ÎÄÊı¾İ
-·µ»ØÖµ£ºÎŞ
-]]
-local function mqttdupind(sckidx,s)
-	if not snd(sckidx,s,{key="MQTTDUP"}) then mqttdupcb(sckidx,false,s) end
-end
-
---[[
-º¯ÊıÃû£ºmqttdupfail
-¹¦ÄÜ  £ºmqttdupÖĞ´¥·¢µÄÖØ·¢±¨ÎÄ£¬ÔÚ×î´óÖØ·¢´ÎÊıÄÚ£¬¶¼·¢ËÍÊ§°ÜµÄÍ¨ÖªÏûÏ¢´¦Àí
-²ÎÊı  £º
-		sckidx£ºsocket idx
-		t£º±¨ÎÄµÄÓÃ»§×Ô¶¨ÒåÀàĞÍ
-		s£º±¨ÎÄÊı¾İ
-		cb£ºÓÃ»§»Øµ÷º¯Êı
-		cbtag£ºÓÃ»§»Øµ÷º¯ÊıµÄµÚÒ»¸ö²ÎÊı
-·µ»ØÖµ£ºÎŞ
-]]
-local function mqttdupfail(sckidx,t,s,cb,cbtag)
-    print("mqttdupfail",t)
-	if cb then cb(cbtag,false) end
-end
-
---mqttdupÖØ·¢ÏûÏ¢´¦Àíº¯Êı±í
-local procer =
-{
-	MQTT_DUP_IND = mqttdupind,
-	MQTT_DUP_FAIL = mqttdupfail,
-}
---×¢²áÏûÏ¢µÄ´¦Àíº¯Êı
-sys.regapp(procer)
-
-
-local tmqtt = {}
-tmqtt.__index = tmqtt
-
-
---[[
-º¯ÊıÃû£ºcreate
-¹¦ÄÜ  £º´´½¨Ò»¸ömqtt client
-²ÎÊı  £º
-		prot£ºstringÀàĞÍ£¬´«Êä²ãĞ­Òé£¬½öÖ§³Ö"TCP"ºÍ"UDP"[±ØÑ¡]
-		host£ºstringÀàĞÍ£¬·şÎñÆ÷µØÖ·£¬Ö§³ÖÓòÃûºÍIPµØÖ·[±ØÑ¡]
-		port£ºnumberÀàĞÍ£¬·şÎñÆ÷¶Ë¿Ú[±ØÑ¡]
-		ver£ºstringÀàĞÍ£¬MQTTĞ­Òé°æ±¾ºÅ£¬½öÖ§³Ö"3.1"ºÍ"3.1.1"£¬Ä¬ÈÏ"3.1"
-·µ»ØÖµ£ºÎŞ
-]]
-function create(prot,host,port,ver)
-	if #tclients>=2 then assert(false,"tclients maxcnt error") return end
-	local mqtt_client =
-	{
-		prot=prot,
-		host=host,
-		port=port,
-		sckidx=socket.SCK_MAX_CNT-#tclients,
-		sckconning=false,
-		sckconnected=false,
-		sckreconncnt=0,
-		sckreconncyclecnt=0,
-		sckrcvs="",
-		mqttconnected=false,
-		mqttver = ver or "3.1",
-	}
-	setmetatable(mqtt_client,tmqtt)
-	table.insert(tclients,mqtt_client)
-	return(mqtt_client)
-end
-
---[[
-º¯ÊıÃû£ºchange
-¹¦ÄÜ  £º¸Ä±äÒ»¸ömqtt clientµÄsocket²ÎÊı
-²ÎÊı  £º
-		prot£ºstringÀàĞÍ£¬´«Êä²ãĞ­Òé£¬½öÖ§³Ö"TCP"ºÍ"UDP"[±ØÑ¡]
-		host£ºstringÀàĞÍ£¬·şÎñÆ÷µØÖ·£¬Ö§³ÖÓòÃûºÍIPµØÖ·[±ØÑ¡]
-		port£ºnumberÀàĞÍ£¬·şÎñÆ÷¶Ë¿Ú[±ØÑ¡]
-·µ»ØÖµ£ºÎŞ
-]]
-function tmqtt:change(prot,host,port)
-	self.prot,self.host,self.port=prot or self.prot,host or self.host,port or self.port
-end
-
---[[
-º¯ÊıÃû£ºdestroy
-¹¦ÄÜ  £ºÏú»ÙÒ»¸ömqtt client
-²ÎÊı  £º
-		destroycb£ºfunctionÀàĞÍ£¬mqtt clientÏú»ÙºóµÄ»Øµ÷º¯Êı[¿ÉÑ¡]
-·µ»ØÖµ£ºÎŞ
-]]
-function tmqtt:destroy(destroycb)
-	local k,v
-	self.destroycb = destroycb
-	sys.timer_stop(datinactive,self.sckidx)
-	for k,v in pairs(tclients) do
-		if v.sckidx==self.sckidx then
-			socket.close(v.sckidx)
-		end
-	end
-end
-
---[[
-º¯ÊıÃû£ºdisconnect
-¹¦ÄÜ  £º¶Ï¿ªÒ»¸ömqtt client£¬²¢ÇÒ¶Ï¿ªsocket
-²ÎÊı  £º
-		discb£ºfunctionÀàĞÍ£¬¶Ï¿ªºóµÄ»Øµ÷º¯Êı[¿ÉÑ¡]
-·µ»ØÖµ£ºÎŞ
-]]
-function tmqtt:disconnect(discb)
-	print("tmqtt:disconnect",self.discing,self.mqttconnected,self.sckconnected)
-	sys.timer_stop(datinactive,self.sckidx)
-	if self.discing or not self.mqttconnected or not self.sckconnected then
-		if discb then discb() end
-		return
-	end
-	self.discb = discb
-	if not disconnect(self.sckidx,"USER") and discb then discb() end
-end
-
---[[
-º¯ÊıÃû£ºconfigwill
-¹¦ÄÜ  £ºÅäÖÃÒÅÖö²ÎÊı
-²ÎÊı  £º
-		flg£ºnumberÀàĞÍ£¬ÒÅÖö±êÖ¾£¬½öÖ§³Ö0ºÍ1
-		qos£ºnumberÀàĞÍ£¬·şÎñÆ÷¶Ë·¢²¼ÒÅÖöÏûÏ¢µÄ·şÎñÖÊÁ¿µÈ¼¶£¬½öÖ§³Ö0,1,2
-		retain£ºnumberÀàĞÍ£¬ÒÅÖö±£Áô±êÖ¾£¬½öÖ§³Ö0ºÍ1
-		topic£ºstringÀàĞÍ£¬·şÎñÆ÷¶Ë·¢²¼ÒÅÖöÏûÏ¢µÄÖ÷Ìâ£¬gb2312±àÂë
-		payload£ºstringÀàĞÍ£¬·şÎñÆ÷¶Ë·¢²¼ÒÅÖöÏûÏ¢µÄÔØºÉ£¬gb2312±àÂë
-·µ»ØÖµ£ºÎŞ
-]]
-function tmqtt:configwill(flg,qos,retain,topic,payload)
-	self.willflg=flg or 0
-	self.willqos=qos or 0
-	self.willretain=retain or 0
-	self.willtopic=topic or ""
-	self.willpayload=payload or ""
-end
-
---[[
-º¯ÊıÃû£ºsetcleansession
-¹¦ÄÜ  £ºÅäÖÃclean session±êÖ¾
-²ÎÊı  £º
-		flg£ºnumberÀàĞÍ£¬clean session±êÖ¾£¬½öÖ§³Ö0ºÍ1£¬Ä¬ÈÏÎª1
-·µ»ØÖµ£ºÎŞ
-]]
-function tmqtt:setcleansession(flg)
-	self.cleansession=flg or 1
-end
-
---[[
-º¯ÊıÃû£ºconnect
-¹¦ÄÜ  £ºÁ¬½Ómqtt·şÎñÆ÷
-²ÎÊı  £º
-		clientid£ºstringÀàĞÍ£¬client identifier£¬gb2312±àÂë[±ØÑ¡]
-		keepalive£ºnumberÀàĞÍ£¬±£»îÊ±¼ä£¬µ¥Î»Ãë[¿ÉÑ¡£¬Ä¬ÈÏ600]
-		user£ºstringÀàĞÍ£¬ÓÃ»§Ãû£¬gb2312±àÂë[¿ÉÑ¡£¬Ä¬ÈÏ""]
-		password£ºstringÀàĞÍ£¬ÃÜÂë£¬gb2312±àÂë[¿ÉÑ¡£¬Ä¬ÈÏ""]
-		connectedcb£ºfunctionÀàĞÍ£¬mqttÁ¬½Ó³É¹¦µÄ»Øµ÷º¯Êı[¿ÉÑ¡]
-		connecterrcb£ºfunctionÀàĞÍ£¬mqttÁ¬½ÓÊ§°ÜµÄ»Øµ÷º¯Êı[¿ÉÑ¡]
-		sckerrcb£ºfunctionÀàĞÍ£¬socketÁ¬½ÓÊ§°ÜµÄ»Øµ÷º¯Êı[¿ÉÑ¡]
-·µ»ØÖµ£ºÎŞ
-]]
-function tmqtt:connect(clientid,keepalive,user,password,connectedcb,connecterrcb,sckerrcb)
-	self.clientid=clientid
-	self.keepalive=keepalive or 600
-	self.user=user or ""
-	self.password=password or ""
-	--if autoreconnect==nil then autoreconnect=true end
-	--self.autoreconnect=autoreconnect
-	self.connectedcb=connectedcb
-	self.connecterrcb=connecterrcb
-	self.sckerrcb=sckerrcb
-
-	tclients[getclient(self.sckidx)]=self
-
-	if self.mqttconnected then print("tmqtt:connect already connected") return end
-	if not self.sckconnected then
-		connect(self.sckidx,self.prot,self.host,self.port)
-		checkdatactive(self.sckidx)
-	elseif not self.mqttconnected then
-		mqttsnd(self.sckidx,"MQTTCONN")
-	else
-		if connectedcb then connectedcb() end
-	end
-end
-
---[[
-º¯ÊıÃû£ºpublish
-¹¦ÄÜ  £º·¢²¼Ò»ÌõÏûÏ¢
-²ÎÊı  £º
-		topic£ºstringÀàĞÍ£¬ÏûÏ¢Ö÷Ìâ£¬gb2312±àÂë[±ØÑ¡]
-		payload£º¶ş½øÖÆÊı¾İ£¬ÏûÏ¢¸ºÔØ£¬ÓÃ»§×Ô¶¨Òå±àÂë£¬±¾ÎÄ¼ş²»»á¶ÔÊı¾İ×öÈÎºÎ±àÂë×ª»»´¦Àí[±ØÑ¡]
-		flags£ºnumberÀàĞÍ£¬qosºÍretain±êÖ¾£¬½öÖ§³Ö0¡¢1¡¢4¡¢5[¿ÉÑ¡£¬Ä¬ÈÏ0]
-				0±íÊ¾£ºqos=0£¬retain=0
-				1±íÊ¾£ºqos=1£¬retain=0
-				4±íÊ¾£ºqos=0£¬retain=1
-				5±íÊ¾£ºqos=1£¬retain=1
-		ackcb£ºfunctionÀàĞÍ£¬qosÎª1Ê±±íÊ¾ÊÕµ½PUBACKµÄ»Øµ÷º¯Êı,qosÎª0Ê±ÏûÏ¢·¢ËÍ½á¹ûµÄ»Øµ÷º¯Êı[¿ÉÑ¡]
-		usertag£ºstringÀàĞÍ£¬ÓÃ»§»Øµ÷º¯ÊıackcbÓÃµ½µÄµÚÒ»¸ö²ÎÊı[¿ÉÑ¡]
-·µ»ØÖµ£ºÎŞ
-]]
-function tmqtt:publish(topic,payload,flags,ackcb,usertag)
-	--¼ì²émqttÁ¬½Ó×´Ì¬
-	if not self.mqttconnected then
-		print("tmqtt:publish not connected")
-		if ackcb then ackcb(usertag,false) end
-		return
-	end
-
-	if flags and flags~=0 and flags~=1 and flags~=4 and flags~=5 then assert(false,"tmqtt:publish not support flags "..flags) return end
-	local qos,retain = flags and (bit.band(flags,0x03)) or 0,flags and (bit.isset(flags,2) and 1 or 0) or 0
-	--print("tmqtt:publish",flags,qos,retain)
-	--´ò°üpublish±¨ÎÄ
-	local dat,para = pack(self.mqttver,PUBLISH,{qos=qos,retain=retain,topic=topic,payload=payload})
-
-	--·¢ËÍ
-	local tpara = {key="MQTTPUB",val=para,qos=qos,retain=retain,usertag=usertag,ackcb=ackcb}
-	if not snd(self.sckidx,dat,tpara) then
-		mqttpubcb(self.sckidx,false,tpara)
-	end
-end
-
---[[
-º¯ÊıÃû£ºsubscribe
-¹¦ÄÜ  £º¶©ÔÄÖ÷Ìâ
-²ÎÊı  £º
-		topics£ºtableÀàĞÍ£¬Ò»¸ö»òÕß¶à¸öÖ÷Ìâ£¬Ö÷ÌâÃûgb2312±àÂë£¬ÖÊÁ¿µÈ¼¶½öÖ§³Ö0ºÍ1£¬{{topic="/topic1",qos=ÖÊÁ¿µÈ¼¶}, {topic="/topic2",qos=ÖÊÁ¿µÈ¼¶}, ...}[±ØÑ¡]
-		ackcb£ºfunctionÀàĞÍ£¬±íÊ¾ÊÕµ½SUBACKµÄ»Øµ÷º¯Êı[¿ÉÑ¡]
-		usertag£ºstringÀàĞÍ£¬ÓÃ»§»Øµ÷º¯ÊıackcbÓÃµ½µÄµÚÒ»¸ö²ÎÊı[¿ÉÑ¡]
-·µ»ØÖµ£ºÎŞ
-]]
-function tmqtt:subscribe(topics,ackcb,usertag)
-	--¼ì²émqttÁ¬½Ó×´Ì¬
-	if not self.mqttconnected then
-		print("tmqtt:subscribe not connected")
-		if ackcb then ackcb(usertag,false) end
-		return
-	end
-
-	--½öÖ§³Öqos 0ºÍ1
-	for k,v in pairs(topics) do
-		if v.qos==2 then assert(false,"tmqtt:publish not support qos 2") return end
-	end
-
-	--´ò°üsubscribe±¨ÎÄ
-	local dat,para = pack(self.mqttver,SUBSCRIBE,{topic=topics})
-
-	--·¢ËÍ
-	local tpara = {key="MQTTSUB", val=para, usertag=usertag, ackcb=ackcb}
-	if not snd(self.sckidx,dat,tpara) then
-		mqttsubcb(self.sckidx,false,tpara)
-	end
-end
-
-
---[[
-º¯ÊıÃû£ºunsubscribe
-¹¦ÄÜ  £ºÈ¡Ïû¶©ÔÄÖ÷Ìâ
-²ÎÊı  £º
-		topics£ºtableÀàĞÍ£¬Ò»¸ö»òÕß¶à¸öÖ÷Ìâ£¬Ö÷ÌâÃûgb2312±àÂë£¬{"/topic1","/topic2",...}[±ØÑ¡]
-		ackcb£ºfunctionÀàĞÍ£¬±íÊ¾ÊÕµ½UBSUBACKµÄ»Øµ÷º¯Êı[¿ÉÑ¡]
-		usertag£ºstringÀàĞÍ£¬ÓÃ»§»Øµ÷º¯ÊıackcbÓÃµ½µÄµÚÒ»¸ö²ÎÊı[¿ÉÑ¡]
-·µ»ØÖµ£ºÎŞ
-]]
-function tmqtt:unsubscribe(topics,ackcb,usertag)
-	--¼ì²émqttÁ¬½Ó×´Ì¬
-	if not self.mqttconnected then
-		print("tmqtt:unsubscribe not connected")
-		if ackcb then ackcb(usertag,false) end
-		return
-	end
-
-	--´ò°üunsubscribe±¨ÎÄ
-	local dat,para = pack(self.mqttver,UNSUBSCRIBE,{topic=topics})
-
-	--·¢ËÍ
-	local tpara = {key="MQTTUNSUB", val=para, usertag=usertag, ackcb=ackcb}
-	if not snd(self.sckidx,dat,tpara) then
-		mqttunsubcb(self.sckidx,false,tpara)
-	end
-end
-
---[[
-º¯ÊıÃû£ºregevtcb
-¹¦ÄÜ  £º×¢²áÊÂ¼şµÄ»Øµ÷º¯Êı
-²ÎÊı  £º
-		evtcbs£ºÒ»¶Ô»òÕß¶à¶ÔevtºÍcb£¬¸ñÊ½Îª{evt=cb,...}}£¬evtÈ¡ÖµÈçÏÂ£º
-				"MESSAGE"£º±íÊ¾´Ó·şÎñÆ÷ÊÕµ½ÏûÏ¢£¬µ÷ÓÃcbÊ±£¬¸ñÊ½Îªcb(topic,payload,qos)
-·µ»ØÖµ£ºÎŞ
-]]
-function tmqtt:regevtcb(evtcbs)
-	self.evtcbs=evtcbs
-end
-
---[[
-º¯ÊıÃû£ºgetstatus
-¹¦ÄÜ  £º»ñÈ¡MQTT CLIENTµÄ×´Ì¬
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºMQTT CLIENTµÄ×´Ì¬£¬stringÀàĞÍ£¬¹²4ÖÖ×´Ì¬£º
-		DISCONNECTED£ºÎ´Á¬½Ó×´Ì¬
-		CONNECTING£ºÁ¬½ÓÖĞ×´Ì¬
-		CONNECTED£ºÁ¬½Ó×´Ì¬
-		DISCONNECTING£º¶Ï¿ªÁ¬½ÓÖĞ×´Ì¬
-]]
-function tmqtt:getstatus()
-	if self.mqttconnected then
-		return self.discing and "DISCONNECTING" or "CONNECTED"
-	elseif self.sckconnected or self.sckconning then
-		return "CONNECTING"
-	else
-		return "DISCONNECTED"
-	end
+--- æ–­å¼€ä¸æœåŠ¡å™¨çš„è¿æ¥
+-- @return nil
+-- @usage
+-- mqttc = mqtt.client("clientid-123", nil, nil, false)
+-- mqttc:connect("mqttserver.com", 1883, "tcp")
+-- process data
+-- mqttc:disconnect()
+function mqttc:disconnect()
+    if self.io then
+        if self.connected then self:write(packZeroData(DISCONNECT)) end
+        self.io:close()
+        self.io = nil
+    end
+    self.cache = {}
+    self.inbuf = ""
+    self.connected = false
 end

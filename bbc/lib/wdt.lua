@@ -1,202 +1,79 @@
---[[
-Ä£¿éÃû³Æ£ºÓ²¼ş¿´ÃÅ¹·
-Ä£¿é¹¦ÄÜ£ºÖ§³ÖÓ²¼ş¿´ÃÅ¹·¹¦ÄÜ
-Ä£¿é×îºóĞŞ¸ÄÊ±¼ä£º2017.02.16
-Éè¼ÆÎÄµµ²Î¿¼ doc\Ğ¡ÂùGPS¶¨Î»Æ÷Ïà¹ØÎÄµµ\Watchdog descritption.doc
-]]
+--- æ¨¡å—åŠŸèƒ½ï¼šå¤–éƒ¨ç¡¬ä»¶çœ‹é—¨ç‹—
+-- @module wdt
+-- @author openLuat
+-- @license MIT
+-- @copyright openLuat
+-- @release 2017.09.23 11:34
+module(..., package.seeall)
 
-module(...,package.seeall)
+require "pins"
 
---Ä£¿é¸´Î»µ¥Æ¬»úÒı½Å
-local RST_SCMWD_PIN = pio.P0_30
---Ä£¿éºÍµ¥Æ¬»úÏà»¥Î¹¹·Òı½Å
-local WATCHDOG_PIN = pio.P0_31
+local restarting
 
---scm_active£ºµ¥Æ¬»úÊÇ·ñÔËĞĞÕı³££¬true±íÊ¾Õı³££¬false»ònil±íÊ¾Òì³£
---get_scm_cnt£º¡°¼ì²âµ¥Æ¬»ú¶ÔÄ£¿éÎ¹¹·ÊÇ·ñÕı³£¡±µÄÊ£Óà´ÎÊı
-local scm_active,get_scm_cnt = true,20
---testcnt£ºÎ¹¹·²âÊÔ¹ı³ÌÖĞÒÑ¾­Î¹¹·µÄ´ÎÊı
---testing£ºÊÇ·ñÕıÔÚÎ¹¹·²âÊÔ
-local testcnt,testing = 0
-
---[[
-º¯ÊıÃû£ºgetscm
-¹¦ÄÜ  £º¶ÁÈ¡"µ¥Æ¬»ú¶ÔÄ£¿éÎ¹¹·µÄÒı½Å"µçÆ½
-²ÎÊı  £º
-		tag£º"normal"±íÊ¾Õı³£Î¹¹·£¬"test"±íÊ¾Î¹¹·²âÊÔ
-·µ»ØÖµ£ºÎŞ
-]]
-local function getscm(tag)
-	--Èç¹ûÕıÔÚ½øĞĞÎ¹¹·²âÊÔ£¬²»ÔÊĞíÕı³£Î¹¹·
-	if tag=="normal" and testing then return end
-	--¼ì²âÊ£Óà´ÎÊı¼õÒ»
-	get_scm_cnt = get_scm_cnt - 1
-	--Èç¹ûÊÇÎ¹¹·²âÊÔ£¬Í£µôÕı³£Î¹¹·µÄÁ÷³Ì
-	if tag=="test" then
-		sys.timer_stop(getscm,"normal")
-	end
-	--¼ì²âÊ£Óà´ÎÊı»¹²»Îª0
-	if get_scm_cnt > 0 then
-		--Î¹¹·²âÊÔ
-		if tag=="test" then
-			--Èç¹û¼ì²âµ½¸ßµçÆ½
-			if pio.pin.getval(WATCHDOG_PIN) == 1 then				
-				testcnt = testcnt+1
-				--Ã»ÓĞÂú×ãÁ¬Ğø3´ÎÎ¹¹·£¬100ºÁÃëºó£¬¼ÌĞøÏÂ´ÎÎ¹¹·
-				if testcnt<3 then
-					sys.timer_start(feed,100,"test")
-					get_scm_cnt = 20
-					return
-				--Î¹¹·²âÊÔ½áÊø£¬Á¬Ğø3´ÎÎ¹¹·£¬µ¥Æ¬»ú»á¸´Î»Ä£¿é
-				else
-					testing = nil
-				end
-			end
-		end
-		--100ºÁÃëÖ®ºó½Ó×Å¼ì²â
-		sys.timer_start(getscm,100,tag)
-	--¼ì²â½áÊø
-	else
-		get_scm_cnt = 20
-		if tag=="test" then
-			testing = nil
-		end
-		--ÕıÔÚÎ¹¹· ²¢ÇÒ µ¥Æ¬»úÔËĞĞÒì³£
-		if tag=="normal" and not scm_active then
-			--¸´Î»µ¥Æ¬»ú
-			pio.pin.setval(0,RST_SCMWD_PIN)
-			sys.timer_start(pio.pin.setval,100,1,RST_SCMWD_PIN)
-			print("wdt reset 153b")
-			scm_active = true
-		end
-	end
-	--Èç¹û¼ì²âµ½µÍµçÆ½£¬Ôò±íÊ¾µ¥Æ¬»úÔËĞĞÕı³£
-	if pio.pin.getval(WATCHDOG_PIN) == 0 and not scm_active then
-		scm_active = true
-		print("wdt scm_active = true")
-	end
+--[[æ¨¡å—å’Œçœ‹é—¨ç‹—äº’å–‚ä»»åŠ¡
+-- @return æ— 
+-- @usage local RST_SCMWD_PIN,RST_SCMWD_PIN
+-- @usage taskWdt()
+--]]
+local function taskWdt(rst, wd, restartFlag)
+    local wdtRestartAirFlag = restartFlag
+    -- åˆå§‹åŒ–å–‚ç‹—å¼•è„šç”µå¹³(åˆå§‹é«˜ç”µå¹³ï¼Œå–‚ç‹—æ‹‰ä½2ç§’)
+    rst(1)
+    wd(1)
+    -- æ¨¡å—<--->çœ‹é—¨ç‹—  ç›¸äº’å¾ªç¯å–‚è„‰å†²
+    while true do
+        -- æ¨¡å— ---> çœ‹é—¨ç‹— å–‚è„‰å†²
+        wd(0)
+        log.info("wdt.taskWdt", "AirM2M --> WATCHDOG : OK", wdtRestartAirFlag, restarting)
+        if not wdtRestartAirFlag and restarting then return end
+        sys.wait(2000)
+        -- çœ‹é—¨ç‹— ---> æ¨¡å— å–‚è„‰å†²
+        wd(nil, true)
+        for i = 1, 30 do
+            if 0 ~= wd() then
+                if not wdtRestartAirFlag and restarting then return end
+                sys.wait(100)
+            else
+                log.info("wdt.taskWdt", "AirM2M <-- WatchDog : OK")
+                break
+            end
+            -- ç‹—æ­»äº†
+            if 30 == i then
+                -- å¤ä½ç‹—
+                rst(0)
+                log.error("wdt.taskWdt", "WatchDog <--> AirM2M didn't respond : wdt reset 153b")
+                if not wdtRestartAirFlag and restarting then return end
+                sys.wait(100)
+                rst(1)
+            end
+        end
+        -- 2åˆ†é’Ÿåå†å–‚
+        if not wdtRestartAirFlag and restarting then return end
+        sys.wait(wdtRestartAirFlag and 1500 or 120000)
+        wd(0, true)
+    end
 end
 
---[[
-º¯ÊıÃû£ºfeedend
-¹¦ÄÜ  £º¼ì²â"µ¥Æ¬»ú¶ÔÄ£¿éÎ¹¹·"ÊÇ·ñÕı³£
-²ÎÊı  £º
-		tag£º"normal"±íÊ¾Õı³£Î¹¹·£¬"test"±íÊ¾Î¹¹·²âÊÔ
-·µ»ØÖµ£ºÎŞ
-]]
-local function feedend(tag)
-	--Èç¹ûÕıÔÚ½øĞĞÎ¹¹·²âÊÔ£¬²»ÔÊĞíÕı³£Î¹¹·
-	if tag=="normal" and testing then return end
-	--Ïà»¥Î¹¹·Òı½ÅÅäÖÃÎªÊäÈë
-	pio.pin.close(WATCHDOG_PIN)
-	pio.pin.setdir(pio.INPUT,WATCHDOG_PIN)
-	print("wdt feedend",tag)
-	--Èç¹ûÊÇÎ¹¹·²âÊÔ£¬Í£µôÕı³£Î¹¹·µÄÁ÷³Ì
-	if tag=="test" then
-		sys.timer_stop(getscm,"normal")
-	end
-	--100ºÁÃëºóÈ¥¶ÁÒ»´ÎÎ¹¹·Òı½ÅµÄÊäÈëµçÆ½
-	--Ã¿100ºÁÃëÈ¥¶ÁÒ»´Î£¬Á¬Ğø¶Á20´Î£¬Ö»ÒªÓĞÒ»´Î¶Áµ½µÍµçÆ½£¬¾ÍÈÏÎª"µ¥Æ¬»ú¶ÔÄ£¿éÎ¹¹·"Õı³£
-	sys.timer_start(getscm,100,tag)
+--- é…ç½®æ¨¡å—ä¸çœ‹é—¨ç‹—é€šè®¯IOå¹¶å¯åŠ¨ä»»åŠ¡
+-- @param rst -- æ¨¡å—å¤ä½å•ç‰‡æœºå¼•è„š(pio.P0_31)
+-- @param wd  -- æ¨¡å—å’Œå•ç‰‡æœºç›¸äº’å–‚ç‹—å¼•è„š(pio.P0_29)
+-- @return æ— 
+-- @usage setup(pio.P0_31,pio.P0_29)
+function setup(rst, wd)
+    sys.taskInit(taskWdt, rst and pins.setup(rst, 0, pio.PULLUP) or function() end, pins.setup(wd, 0, pio.PULLUP))
 end
 
---[[
-º¯ÊıÃû£ºfeed
-¹¦ÄÜ  £ºÄ£¿é¿ªÊ¼¶Ôµ¥Æ¬»úÎ¹¹·
-²ÎÊı  £º
-		tag£º"normal"±íÊ¾Õı³£Î¹¹·£¬"test"±íÊ¾Î¹¹·²âÊÔ
-·µ»ØÖµ£ºÎŞ
-]]
-function feed(tag)
-	--Èç¹ûÕıÔÚ½øĞĞÎ¹¹·²âÊÔ£¬²»ÔÊĞíÕı³£Î¹¹·
-	if tag=="normal" and testing then return end
-	--Èç¹ûµ¥Æ¬»úÔËĞĞÕı³£ »òÕß ÕıÔÚ½øĞĞÎ¹¹·²âÊÔ
-	if scm_active or tag=="test" then
-		scm_active = false
-	end
-
-	--Ïà»¥Î¹¹·Òı½ÅÅäÖÃÎªÊä³ö£¬"Ä£¿é¿ªÊ¼¶Ôµ¥Æ¬»úÎ¹¹·"£¬Êä³ö2ÃëµÄµÍµçÆ½
-	pio.pin.close(WATCHDOG_PIN)
-	pio.pin.setdir(pio.OUTPUT,WATCHDOG_PIN)
-	pio.pin.setval(0,WATCHDOG_PIN)
-	print("wdt feed",tag)
-	--2·ÖÖÓÆô¶¯ÏÂ´ÎÕı³£Î¹¹·
-	sys.timer_start(feed,120000,"normal")
-	--Èç¹ûÊÇÎ¹¹·²âÊÔ£¬Í£µôÕı³£Î¹¹·µÄÁ÷³Ì
-	if tag=="test" then
-		sys.timer_stop(feedend,"normal")
-	end
-	--2Ãëºó¿ªÊ¼¼ì²â"µ¥Æ¬»ú¶ÔÄ£¿éÎ¹¹·"ÊÇ·ñÕı³£
-	sys.timer_start(feedend,2000,tag)
+--- ç¡¬ä»¶çœ‹é—¨ç‹—ç«‹å³é‡å¯æ¨¡å—
+-- è°ƒç”¨æ­¤æ¥å£å‰ï¼Œå¿…é¡»ä¿è¯wdt.setupå·²ç»è¢«æ‰§è¡Œè¿‡
+-- @param rst -- æ¨¡å—å¤ä½å•ç‰‡æœºå¼•è„š(pio.P0_31)
+-- @param wd  -- æ¨¡å—å’Œå•ç‰‡æœºç›¸äº’å–‚ç‹—å¼•è„š(pio.P0_29)
+-- @return nil
+-- @usage wdt.restart()
+function restart(rst, wd)
+    if not restarting then
+        restarting = true
+        if rst then pins.close(rst) end
+        pins.close(wd)
+        sys.taskInit(taskWdt, rst and pins.setup(rst, 0, pio.PULLUP) or function() end, pins.setup(wd, 0, pio.PULLUP),true)
+    end
 end
-
---[[
-º¯ÊıÃû£ºopen
-¹¦ÄÜ  £º´ò¿ª¿ª·¢°åÉÏµÄÓ²¼ş¿´ÃÅ¹·¹¦ÄÜ£¬²¢Á¢¼´Î¹¹·
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-function open()
-	pio.pin.setdir(pio.OUTPUT,WATCHDOG_PIN)
-	pio.pin.setval(1,WATCHDOG_PIN)
-	feed("normal")
-end
-
---[[
-º¯ÊıÃû£ºclose
-¹¦ÄÜ  £º¹Ø±Õ¿ª·¢°åÉÏµÄÓ²¼ş¿´ÃÅ¹·¹¦ÄÜ
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-function close()
-	sys.timer_stop_all(feedend)
-	sys.timer_stop_all(feed)
-	sys.timer_stop_all(getscm)
-	sys.timer_stop(pio.pin.setval,1,RST_SCMWD_PIN)
-	pio.pin.close(RST_SCMWD_PIN)
-	pio.pin.close(WATCHDOG_PIN)
-	scm_active,get_scm_cnt,testcnt,testing = true,20,0
-end
-
---[[
-º¯ÊıÃû£ºtest
-¹¦ÄÜ  £º²âÊÔ¡°¿ª·¢°åÉÏµÄÓ²¼ş¿´ÃÅ¹·¸´Î»AirÄ£¿é¡±µÄ¹¦ÄÜ
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-function test()
-	if not testing then
-		testcnt,testing = 0,true
-		feed("test")
-	end
-end
-
-
---[[
-º¯ÊıÃû£ºbegin
-¹¦ÄÜ  £ºÆô¶¯Î¹¹·Á÷³Ì
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-local function begin()
-	--Ä£¿é¸´Î»µ¥Æ¬»úÒı½Å£¬Ä¬ÈÏÊä³ö¸ßµçÆ½
-	pio.pin.setdir(pio.OUTPUT1,RST_SCMWD_PIN)
-	pio.pin.setval(1,RST_SCMWD_PIN)
-	open()
-end
-
---[[
-º¯ÊıÃû£ºsetup
-¹¦ÄÜ  £ºÅäÖÃÎ¹¹·Ê¹ÓÃµÄÁ½¸öÒı½Å
-²ÎÊı  £º
-		rst£ºÄ£¿é¸´Î»µ¥Æ¬»úÒı½Å
-		wd£ºÄ£¿éºÍµ¥Æ¬»úÏà»¥Î¹¹·Òı½Å
-·µ»ØÖµ£ºÎŞ
-]]
-function setup(rst,wd)
-	RST_SCMWD_PIN,WATCHDOG_PIN = rst,wd
-	sys.timer_stop(begin)
-	begin()
-end
-
-sys.timer_start(begin,2000)

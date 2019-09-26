@@ -1,192 +1,134 @@
---[[
-Ä£¿éÃû³Æ£ºÍøÂçÊ±¼ä¸üĞÂ
-Ä£¿é¹¦ÄÜ£ºÖ»ÔÚÃ¿´Î¿ª»ú»òÕßÖØÆôÊ±£¬Á¬½ÓNTP·şÎñÆ÷£¬¸üĞÂÏµÍ³Ê±¼ä
--- ÖØÒªÌáĞÑ£¡£¡£¡£¡£¡£¡
--- ±¾¹¦ÄÜÄ£¿é²ÉÓÃ¶à¸öÃâ·Ñ¹«¹²µÄNTP·şÎñÆ÷À´Í¬²½Ê±¼ä
--- ²¢²»ÄÜ±£Ö¤ÈÎºÎÊ±¼äÈÎºÎµØµã¶¼ÄÜ°Ù·Ö°ÙÍ¬²½µ½ÕıÈ·µÄÊ±¼ä
--- ËùÒÔ£¬Èç¹ûÓÃ»§ÏîÄ¿ÖĞµÄÒµÎñÂß¼­ÑÏ¸ñÒÀÀµÓÚÊ±¼äÍ¬²½¹¦ÄÜ
--- Ôò²»ÒªÊ¹ÓÃÊ¹ÓÃ±¾¹¦ÄÜÄ£¿é£¬½¨ÒéÊ¹ÓÃ×Ô¼ºµÄÓ¦ÓÃ·şÎñÆ÷À´Í¬²½Ê±¼ä
-ÇëÏÈ×ÔĞĞ°Ù¶ÈÑ§Ï°NTPĞ­Òé
-È»ºóÔÙÔÄ¶Á±¾Ä£¿é
-Ä£¿é×îºóĞŞ¸ÄÊ±¼ä£º2017.03.22
-]]
-
---¶¨ÒåÄ£¿é,µ¼ÈëÒÀÀµ¿â
-local base = _G
-local string = require"string"
-local os = require"os"
-local sys  = require"sys"
-local link = require"link"
-local misc = require"misc"
-local common = require"common"
-local pack = require"pack"
-module(...)
-
---¼ÓÔØ³£ÓÃµÄÈ«¾Öº¯ÊıÖÁ±¾µØ
-local print = base.print
-local send = link.send
-local dispatch = sys.dispatch
-local sbyte,ssub = string.byte,string.sub
-
-
---¿ÉÓÃµÄNTP·şÎñÆ÷ÓòÃû¼¯ºÏ£¬°´ÕÕË³ĞòÈ¥Á¬½Ó·şÎñÆ÷Í¬²½Ê±¼ä£¬Í¬²½³É¹¦ºó£¬¾ÍÍË³ö£¬²»ÔÙ¼ÌĞø±éÀú
-local tserver =
-{	
-	"cn.pool.ntp.org",
-	"ntp1.aliyun.com",
-	"cn.ntp.org.cn",    
-	"s2c.time.edu.cn",
-	"tw.pool.ntp.org",    
-	"0.cn.pool.ntp.org",
-	"0.tw.pool.ntp.org",	
-	"1.cn.pool.ntp.org",
-	"1.tw.pool.ntp.org",
-	"ntp2.aliyun.com",
-	"2.cn.pool.ntp.org",
-	"2.tw.pool.ntp.org",
-	"ntp3.aliyun.com",
-	"3.cn.pool.ntp.org",
-	"3.tw.pool.ntp.org",
-	"edu.ntp.org.cn", 
+--- æ¨¡å—åŠŸèƒ½ï¼šç½‘ç»œæˆæ—¶.
+-- é‡è¦æé†’ï¼ï¼ï¼ï¼ï¼ï¼
+-- æœ¬åŠŸèƒ½æ¨¡å—é‡‡ç”¨å¤šä¸ªå…è´¹å…¬å…±çš„NTPæœåŠ¡å™¨æ¥åŒæ­¥æ—¶é—´
+-- å¹¶ä¸èƒ½ä¿è¯ä»»ä½•æ—¶é—´ä»»ä½•åœ°ç‚¹éƒ½èƒ½ç™¾åˆ†ç™¾åŒæ­¥åˆ°æ­£ç¡®çš„æ—¶é—´
+-- æ‰€ä»¥ï¼Œå¦‚æœç”¨æˆ·é¡¹ç›®ä¸­çš„ä¸šåŠ¡é€»è¾‘ä¸¥æ ¼ä¾èµ–äºæ—¶é—´åŒæ­¥åŠŸèƒ½
+-- åˆ™ä¸è¦ä½¿ç”¨ä½¿ç”¨æœ¬åŠŸèƒ½æ¨¡å—ï¼Œå»ºè®®ä½¿ç”¨è‡ªå·±çš„åº”ç”¨æœåŠ¡å™¨æ¥åŒæ­¥æ—¶é—´
+-- @module ntp
+-- @author openLuat
+-- @license MIT
+-- @copyright openLuat
+-- @release 2017.10.21
+require "misc"
+require "socket"
+require "utils"
+require "log"
+local sbyte, ssub = string.byte, string.sub
+module(..., package.seeall)
+-- NTPæœåŠ¡å™¨åŸŸåé›†åˆ
+local timeServer = {
+    "cn.pool.ntp.org",
+    "edu.ntp.org.cn",
+    "cn.ntp.org.cn",
+    "s2c.time.edu.cn",
+    "time1.aliyun.com",
+    "tw.pool.ntp.org",
+    "0.cn.pool.ntp.org",
+    "0.tw.pool.ntp.org",
+    "1.cn.pool.ntp.org",
+    "1.tw.pool.ntp.org",
+    "3.cn.pool.ntp.org",
+    "3.tw.pool.ntp.org",
 }
---µ±Ç°Á¬½ÓµÄ·şÎñÆ÷ÔÚtserverÖĞµÄË÷Òı
-local tserveridx = 1
+-- åŒæ­¥è¶…æ—¶ç­‰å¾…æ—¶é—´
+local NTP_TIMEOUT = 8000
+-- åŒæ­¥æ˜¯å¦å®Œæˆæ ‡è®°
+local ntpEnd = false
 
---REQUESTÃüÁîµÈ´ıÊ±¼ä
-local REQUEST_TIMEOUT = 8000
---Ã¿´ÎREQUESTÃüÁîÖØÊÔ´ÎÊı
-local REQUEST_RETRY_TIMES = 1
---socket id
-local lid
---Óëµ±Ç°µÄNTP·şÎñÆ÷Ê±¼äÍ¬²½ÒÑ¾­ÖØÊÔµÄ´ÎÊı
-local retries = 0
-
-
---[[
-º¯ÊıÃû£ºretry
-¹¦ÄÜ  £ºÊ±¼äÍ¬²½¹ı³ÌÖĞµÄÖØÊÔ¶¯×÷
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-local function retry()
-	sys.timer_stop(retry)
-	--ÖØÊÔ´ÎÊı¼Ó1
-	retries = retries + 1
-	--Î´´ïÖØÊÔ´ÎÊı,¼ÌĞø·¢ËÍÍ¬²½ÇëÇó
-	if retries < REQUEST_RETRY_TIMES then
-		request()
-	else
-		--³¬¹ıÖØÊÔ´ÎÊı,Óëµ±Ç°·şÎñÆ÷Í¬²½Ê§°Ü
-		upend(false)
-	end
+--- è·å–NTPæœåŠ¡å™¨åœ°å€åˆ—è¡¨
+-- @return table,æœåŠ¡å™¨åœ°å€åˆ—è¡¨
+-- @usage local addtable = ntp.getServers()
+function getServers()
+    return timeServer
 end
 
-
---[[
-º¯ÊıÃû£ºupend
-¹¦ÄÜ  £ºÓëµ±Ç°µÄNTP·şÎñÆ÷Ê±¼äÍ¬²½½á¹û´¦Àí
-²ÎÊı  £º
-		suc£ºÊ±¼äÍ¬²½½á¹û£¬trueÎª³É¹¦£¬ÆäÓàÎªÊ§°Ü
-·µ»ØÖµ£ºÎŞ
-]]
-function upend(suc)
-	print("ntp.upend",tserver[tserveridx],suc)
-	--Í£Ö¹ÖØÊÔ¶¨Ê±Æ÷
-	sys.timer_stop(retry)
-	retries = 0
-	--¶Ï¿ªÁ´½Ó
-	link.close(lid)
-	--Í¬²½Ê±¼ä³É¹¦ »òÕß NTP·şÎñÆ÷ÒÑ¾­ÍêÕû±éÀú
-	if suc or tserveridx>=#tserver then
-		--²úÉúÒ»¸öÄÚ²¿ÏûÏ¢NTP_END_IND£¬Ä¿Ç°Óë·ÉĞĞÄ£Ê½ÅäºÏÊ¹ÓÃ
-		dispatch("NTP_END_IND",suc)
-		--²úÉúÒ»¸öÍâ²¿ÏûÏ¢NTP_IND£¬¹©Ó¦ÓÃ½Å±¾Ê¹ÓÃ£¬suc±íÊ¾Í¬²½Ê±¼äµÄ½á¹û
-		dispatch("NTP_IND",suc)
-	else
-		tserveridx = tserveridx+1
-		connect()
-	end	
+--- è®¾ç½®NTPæœåŠ¡å™¨åœ°å€åˆ—è¡¨
+-- @param st,tabç±»å‹ï¼ŒæœåŠ¡å™¨åœ°å€åˆ—è¡¨
+-- @return æ— 
+-- @usage ntp.getServers({"1edu.ntp.org.cn","cn.ntp.org.cn"})
+function setServers(st)
+    timeServer = st
 end
 
---[[
-º¯ÊıÃû£ºrequest
-¹¦ÄÜ  £º·¢ËÍ¡°Í¬²½Ê±¼ä¡±ÇëÇóÊı¾İµ½·şÎñÆ÷
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-function request()
-	send(lid,common.hexstobins("E30006EC0000000000000000314E31340000000000000000000000000000000000000000000000000000000000000000"))
-	sys.timer_start(retry,REQUEST_TIMEOUT)
+--- NTPåŒæ­¥æ ‡å¿—
+-- @return boole,NTPçš„åŒæ­¥çŠ¶æ€trueä¸ºæˆåŠŸ,fasleä¸ºå¤±è´¥
+-- @usage local sta = ntp.isEnd()
+function isEnd()
+    return ntpEnd
 end
 
---[[
-º¯ÊıÃû£ºnofity
-¹¦ÄÜ  £ºsocket×´Ì¬µÄ´¦Àíº¯Êı
-²ÎÊı  £º
-        id£ºsocket id£¬³ÌĞò¿ÉÒÔºöÂÔ²»´¦Àí
-        evt£ºÏûÏ¢ÊÂ¼şÀàĞÍ
-		val£º ÏûÏ¢ÊÂ¼ş²ÎÊı
-·µ»ØÖµ£ºÎŞ
-]]
-local function nofity(id,evt,val)
-	--Á¬½Ó½á¹û
-	if evt == "CONNECT" then
-		--²úÉúÒ»¸öÄÚ²¿ÏûÏ¢NTP_BEGIN_IND£¬Ä¿Ç°Óë·ÉĞĞÄ£Ê½ÅäºÏÊ¹ÓÃ
-		dispatch("NTP_BEGIN_IND")
-		--Á¬½Ó³É¹¦
-		if val == "CONNECT OK" then
-			request()
-		--Á¬½ÓÊ§°Ü
-		else
-			upend(false)
-		end
-	--Á¬½Ó±»¶¯¶Ï¿ª
-	elseif evt == "STATE" and val == "CLOSED" then		 
-		upend(false)
-	end
+--- åŒæ­¥æ—¶é—´ï¼Œæ¯ä¸ªNTPæœåŠ¡å™¨å°è¯•3æ¬¡ï¼Œè¶…æ—¶8ç§’,é€‚ç”¨äºè¢«ä»»åŠ¡å‡½æ•°è°ƒç”¨
+-- @param ts,æ¯éš”tså°æ—¶åŒæ­¥1æ¬¡
+-- @param fnc,åŒæ­¥æˆåŠŸåå›è°ƒå‡½æ•°
+-- @param fun,åŒæ­¥æˆåŠŸå‰å›è°ƒå‡½æ•°
+-- @return æ— 
+-- @usage ntp.ntpTime() -- åªåŒæ­¥1æ¬¡
+-- @usage ntp.ntpTime(1) -- 1å°æ—¶åŒæ­¥1æ¬¡
+-- @usage ntp.ntpTime(nil,fnc) -- åªåŒæ­¥1æ¬¡ï¼ŒåŒæ­¥æˆåŠŸåæ‰§è¡Œfnc()
+-- @usage ntp.ntpTime(24,fnc) -- 24å°æ—¶åŒæ­¥1æ¬¡ï¼ŒåŒæ­¥æˆåŠŸåæ‰§è¡Œfnc()
+function ntpTime(ts, fnc, fun)
+    local rc, data, ntim
+    ntpEnd = false
+    while true do
+        local tUnusedSvr = {}
+        for i = 1, #timeServer do
+            tUnusedSvr[i] = timeServer[i]
+        end
+        for i = 1, #timeServer do
+            while not socket.isReady() do sys.waitUntil('IP_READY_IND') end
+            local c = socket.udp()
+            local idx = rtos.tick() % #tUnusedSvr + 1
+            if c:connect(tUnusedSvr[idx], "123") then
+                if c:send(string.fromHex("E30006EC0000000000000000314E31340000000000000000000000000000000000000000000000000000000000000000")) then
+                    rc, data = c:recv(NTP_TIMEOUT)
+                    if rc and #data == 48 then
+                        ntim = os.date("*t", (sbyte(ssub(data, 41, 41)) - 0x83) * 2 ^ 24 + (sbyte(ssub(data, 42, 42)) - 0xAA) * 2 ^ 16 + (sbyte(ssub(data, 43, 43)) - 0x7E) * 2 ^ 8 + (sbyte(ssub(data, 44, 44)) - 0x80) + 1)
+                        if type(fun) == "function" then fun() end
+                        misc.setClock(ntim, fnc)
+                        ntpEnd = true
+                        c:close()
+                        break
+                    end
+                end
+            end
+            
+            local cnt, n, m = #tUnusedSvr, 1
+            for m = 1, cnt do
+                if m ~= idx then
+                    tUnusedSvr[n] = tUnusedSvr[m]
+                    n = n + 1
+                end
+            end
+            tUnusedSvr[cnt] = nil
+            
+            c:close()
+            sys.wait(1000)
+        end
+        if ntpEnd then
+            sys.publish("NTP_SUCCEED")
+            log.info("ntp.timeSync is date:", ntim.year .. "/" .. ntim.month .. "/" .. ntim.day .. "," .. ntim.hour .. ":" .. ntim.min .. ":" .. ntim.sec)
+            if ts == nil or type(ts) ~= "number" then break end
+            sys.wait(ts * 3600 * 1000)
+        else
+            log.warn("ntp.timeSync is error!")
+            sys.wait(1000)
+        end
+    end
 end
-
---[[
-º¯ÊıÃû£ºsetclkcb
-¹¦ÄÜ  £ºµ÷ÓÃmisc.setclock½Ó¿ÚÉèÖÃÊ±¼äºóµÄ»Øµ÷º¯Êı
-²ÎÊı  £º
-        cmd £º³ÌĞò¿ÉÒÔºöÂÔ²»´¦Àí
-        suc£ºÉèÖÃ³É¹¦»òÕßÊ§°Ü£¬true³É¹¦£¬ÆäËûÊ§°Ü
-·µ»ØÖµ£ºÎŞ
-]]
-local function setclkcb(cmd,suc)
-	upend(suc)
+---  è‡ªåŠ¨åŒæ­¥æ—¶é—´ä»»åŠ¡é€‚åˆç‹¬ç«‹æ‰§è¡Œ.
+-- é‡è¦æé†’ï¼ï¼ï¼ï¼ï¼ï¼
+-- æœ¬åŠŸèƒ½æ¨¡å—é‡‡ç”¨å¤šä¸ªå…è´¹å…¬å…±çš„NTPæœåŠ¡å™¨æ¥åŒæ­¥æ—¶é—´
+-- å¹¶ä¸èƒ½ä¿è¯ä»»ä½•æ—¶é—´ä»»ä½•åœ°ç‚¹éƒ½èƒ½ç™¾åˆ†ç™¾åŒæ­¥åˆ°æ­£ç¡®çš„æ—¶é—´
+-- æ‰€ä»¥ï¼Œå¦‚æœç”¨æˆ·é¡¹ç›®ä¸­çš„ä¸šåŠ¡é€»è¾‘ä¸¥æ ¼ä¾èµ–äºæ—¶é—´åŒæ­¥åŠŸèƒ½
+-- åˆ™ä¸è¦ä½¿ç”¨ä½¿ç”¨æœ¬åŠŸèƒ½æ¨¡å—ï¼Œå»ºè®®ä½¿ç”¨è‡ªå·±çš„åº”ç”¨æœåŠ¡å™¨æ¥åŒæ­¥æ—¶é—´
+-- @return æ— 
+-- @param ts,æ¯éš”tså°æ—¶åŒæ­¥1æ¬¡
+-- @param fnc,åŒæ­¥æˆåŠŸåå›è°ƒå‡½æ•°
+-- @param fun,åŒæ­¥æˆåŠŸå‰å›è°ƒå‡½æ•°
+-- @usage ntp.timeSync() -- åªåŒæ­¥1æ¬¡
+-- @usage ntp.timeSync(1) -- 1å°æ—¶åŒæ­¥1æ¬¡
+-- @usage ntp.timeSync(nil,fnc) -- åªåŒæ­¥1æ¬¡ï¼ŒåŒæ­¥æˆåŠŸåæ‰§è¡Œfnc()
+-- @usage ntp.timeSync(24,fnc) -- 24å°æ—¶åŒæ­¥1æ¬¡ï¼ŒåŒæ­¥æˆåŠŸåæ‰§è¡Œfnc()
+function timeSync(ts, fnc, fun)
+    sys.taskInit(ntpTime, ts, fnc, fun)
 end
-
---[[
-º¯ÊıÃû£ºrecv
-¹¦ÄÜ  £ºsocket½ÓÊÕÊı¾İµÄ´¦Àíº¯Êı
-²ÎÊı  £º
-        id £ºsocket id£¬³ÌĞò¿ÉÒÔºöÂÔ²»´¦Àí
-        data£º½ÓÊÕµ½µÄÊı¾İ
-·µ»ØÖµ£ºÎŞ
-]]
-local function recv(id,data)
-	--Í£Ö¹ÖØÊÔ¶¨Ê±Æ÷
-	sys.timer_stop(retry)
-	--Êı¾İ¸ñÊ½´íÎó
-	if string.len(data)~=48 then
-		upend(false)
-		return
-	end
-	print("ntp recv:",common.binstohexs(ssub(data,41,44)))
-	misc.setclock(os.date("*t",(sbyte(ssub(data,41,41))-0x83)*2^24+(sbyte(ssub(data,42,42))-0xAA)*2^16+(sbyte(ssub(data,43,43))-0x7E)*2^8+(sbyte(ssub(data,44,44))-0x80)+1),setclkcb)
-end
-
---[[
-º¯ÊıÃû£ºconnect
-¹¦ÄÜ  £º´´½¨socket£¬²¢ÇÒÁ¬½ÓµÚtserveridx¸öNTP·şÎñÆ÷
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºÎŞ
-]]
-function connect()
-	lid = link.open(nofity,recv,"ntp")
-	link.connect(lid,"UDP",tserver[tserveridx],123)
-end
-
-connect()

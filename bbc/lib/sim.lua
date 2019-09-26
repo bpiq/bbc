@@ -1,134 +1,124 @@
---[[
-Ä£¿éÃû³Æ£ºsim¿¨¹¦ÄÜ
-Ä£¿é¹¦ÄÜ£º²éÑ¯sim¿¨×´Ì¬¡¢iccid¡¢imsi¡¢mcc¡¢mnc
-Ä£¿é×îºóĞŞ¸ÄÊ±¼ä£º2017.02.13
-]]
+--- æ¨¡å—åŠŸèƒ½ï¼šæŸ¥è¯¢simå¡çŠ¶æ€ã€iccidã€imsiã€mccã€mnc
+-- @module sim
+-- @author openLuat
+-- @license MIT
+-- @copyright openLuat
+-- @release 2017.02.13
+require "ril"
+require "sys"
+module(..., package.seeall)
 
---¶¨ÒåÄ£¿é,µ¼ÈëÒÀÀµ¿â
-local string = require"string"
-local ril = require"ril"
-local sys = require"sys"
-local base = _G
-local os = require"os"
-module(...)
 
---¼ÓÔØ³£ÓÃµÄÈ«¾Öº¯ÊıÖÁ±¾µØ
-local tonumber = base.tonumber
-local tostring = base.tostring
-local req = ril.request
+--simå¡çš„imsiã€simå¡çš„iccid
+local imsi, iccid, status
 
---sim¿¨µÄimsi¡¢sim¿¨µÄiccid
-local imsi,iccid,status
+--- è·å–simå¡çš„iccid
+-- @return string ,è¿”å›iccidï¼Œå¦‚æœè¿˜æ²¡æœ‰è¯»å–å‡ºæ¥ï¼Œåˆ™è¿”å›nil
+-- @usage æ³¨æ„ï¼šå¼€æœºluaè„šæœ¬è¿è¡Œä¹‹åï¼Œä¼šå‘é€atå‘½ä»¤å»æŸ¥è¯¢iccidï¼Œæ‰€ä»¥éœ€è¦ä¸€å®šæ—¶é—´æ‰èƒ½è·å–åˆ°iccidã€‚å¼€æœºåç«‹å³è°ƒç”¨æ­¤æ¥å£ï¼ŒåŸºæœ¬ä¸Šè¿”å›nil
+-- @usage sim.getIccid()
+function getIccid()
+    return iccid
+end
 
---[[
-º¯ÊıÃû£ºgeticcid
-¹¦ÄÜ  £º»ñÈ¡sim¿¨µÄiccid
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºiccid£¬Èç¹û»¹Ã»ÓĞ¶ÁÈ¡³öÀ´£¬Ôò·µ»Ønil
-×¢Òâ£º¿ª»úlua½Å±¾ÔËĞĞÖ®ºó£¬»á·¢ËÍatÃüÁîÈ¥²éÑ¯iccid£¬ËùÒÔĞèÒªÒ»¶¨Ê±¼ä²ÅÄÜ»ñÈ¡µ½iccid¡£¿ª»úºóÁ¢¼´µ÷ÓÃ´Ë½Ó¿Ú£¬»ù±¾ÉÏ·µ»Ønil
-]]
-function geticcid()
-	return iccid
+--- è·å–simå¡çš„imsi
+-- @return string ,è¿”å›imsiï¼Œå¦‚æœè¿˜æ²¡æœ‰è¯»å–å‡ºæ¥ï¼Œåˆ™è¿”å›nil
+-- @usage å¼€æœºluaè„šæœ¬è¿è¡Œä¹‹åï¼Œä¼šå‘é€atå‘½ä»¤å»æŸ¥è¯¢imsiï¼Œæ‰€ä»¥éœ€è¦ä¸€å®šæ—¶é—´æ‰èƒ½è·å–åˆ°imsiã€‚å¼€æœºåç«‹å³è°ƒç”¨æ­¤æ¥å£ï¼ŒåŸºæœ¬ä¸Šè¿”å›nil
+-- @usage sim.getImsi()
+function getImsi()
+    return imsi
+end
+
+--- è·å–simå¡çš„mcc
+-- @return string ,è¿”å›å€¼ï¼šmccï¼Œå¦‚æœè¿˜æ²¡æœ‰è¯»å–å‡ºæ¥ï¼Œåˆ™è¿”å›""
+-- @usage æ³¨æ„ï¼šå¼€æœºluaè„šæœ¬è¿è¡Œä¹‹åï¼Œä¼šå‘é€atå‘½ä»¤å»æŸ¥è¯¢imsiï¼Œæ‰€ä»¥éœ€è¦ä¸€å®šæ—¶é—´æ‰èƒ½è·å–åˆ°imsiã€‚å¼€æœºåç«‹å³è°ƒç”¨æ­¤æ¥å£ï¼ŒåŸºæœ¬ä¸Šè¿”å›""
+-- @usage sim.getMcc()
+function getMcc()
+    return (imsi ~= nil and imsi ~= "") and string.sub(imsi, 1, 3) or ""
+end
+
+--- è·å–simå¡çš„getmnc
+-- @return string ,è¿”å›mncï¼Œå¦‚æœè¿˜æ²¡æœ‰è¯»å–å‡ºæ¥ï¼Œåˆ™è¿”å›""
+-- @usage   æ³¨æ„ï¼šå¼€æœºluaè„šæœ¬è¿è¡Œä¹‹åï¼Œä¼šå‘é€atå‘½ä»¤å»æŸ¥è¯¢imsiï¼Œæ‰€ä»¥éœ€è¦ä¸€å®šæ—¶é—´æ‰èƒ½è·å–åˆ°imsiã€‚å¼€æœºåç«‹å³è°ƒç”¨æ­¤æ¥å£ï¼ŒåŸºæœ¬ä¸Šè¿”å›""
+-- @usage sim.getMnc()
+function getMnc()
+    return (imsi ~= nil and imsi ~= "") and string.sub(imsi, 4, 5) or ""
+end
+
+--- è·å–simå¡çš„çŠ¶æ€
+-- @return bool ,trueè¡¨ç¤ºsimå¡æ­£å¸¸ï¼Œfalseæˆ–è€…nilè¡¨ç¤ºæœªæ£€æµ‹åˆ°å¡æˆ–è€…å¡å¼‚å¸¸
+-- @usage   å¼€æœºluaè„šæœ¬è¿è¡Œä¹‹åï¼Œä¼šå‘é€atå‘½ä»¤å»æŸ¥è¯¢çŠ¶æ€ï¼Œæ‰€ä»¥éœ€è¦ä¸€å®šæ—¶é—´æ‰èƒ½è·å–åˆ°çŠ¶æ€ã€‚å¼€æœºåç«‹å³è°ƒç”¨æ­¤æ¥å£ï¼ŒåŸºæœ¬ä¸Šè¿”å›nil
+-- @usage sim.getStatus()
+function getStatus()
+    return status
+end
+
+--- è·å–simå¡ç±»å‹
+-- @return string ,"UNSUPPORT"è¡¨ç¤ºcoreè½¯ä»¶ä¸æ”¯æŒæ­¤åŠŸèƒ½ï¼Œ"NO_RDY_SIM"è¡¨ç¤ºSIMå¡æœªå°±ç»ªï¼›"VSIM"è¡¨ç¤ºè™šæ‹ŸSIMå¡ï¼Œ"REAL_SIM"è¡¨ç¤ºå®ä½“SIMå¡
+-- @usage sim.getType()
+function getType()
+    if type(rtos.is_vsim)=="function" then
+        return status and (rtos.is_vsim() and "VSIM" or "REAL_SIM") or "NO_RDY_SIM"
+    else
+        return "UNSUPPORT"
+    end 
 end
 
 --[[
-º¯ÊıÃû£ºgetimsi
-¹¦ÄÜ  £º»ñÈ¡sim¿¨µÄimsi
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºimsi£¬Èç¹û»¹Ã»ÓĞ¶ÁÈ¡³öÀ´£¬Ôò·µ»Ønil
-×¢Òâ£º¿ª»úlua½Å±¾ÔËĞĞÖ®ºó£¬»á·¢ËÍatÃüÁîÈ¥²éÑ¯imsi£¬ËùÒÔĞèÒªÒ»¶¨Ê±¼ä²ÅÄÜ»ñÈ¡µ½imsi¡£¿ª»úºóÁ¢¼´µ÷ÓÃ´Ë½Ó¿Ú£¬»ù±¾ÉÏ·µ»Ønil
+å‡½æ•°åï¼šrsp
+åŠŸèƒ½  ï¼šæœ¬åŠŸèƒ½æ¨¡å—å†…â€œé€šè¿‡è™šæ‹Ÿä¸²å£å‘é€åˆ°åº•å±‚coreè½¯ä»¶çš„ATå‘½ä»¤â€çš„åº”ç­”å¤„ç†
+å‚æ•°  ï¼š
+cmdï¼šæ­¤åº”ç­”å¯¹åº”çš„ATå‘½ä»¤
+successï¼šATå‘½ä»¤æ‰§è¡Œç»“æœï¼Œtrueæˆ–è€…false
+responseï¼šATå‘½ä»¤çš„åº”ç­”ä¸­çš„æ‰§è¡Œç»“æœå­—ç¬¦ä¸²
+intermediateï¼šATå‘½ä»¤çš„åº”ç­”ä¸­çš„ä¸­é—´ä¿¡æ¯
+è¿”å›å€¼ï¼šæ— 
 ]]
-function getimsi()
-	return imsi
+local function rsp(cmd, success, response, intermediate)
+    if cmd == "AT+CCID" then
+        iccid = intermediate
+    elseif cmd == "AT+CIMI" then
+        imsi = intermediate
+        --äº§ç”Ÿä¸€ä¸ªå†…éƒ¨æ¶ˆæ¯IMSI_READYï¼Œé€šçŸ¥å·²ç»è¯»å–imsi
+        sys.publish("IMSI_READY")
+    end
 end
 
 --[[
-º¯ÊıÃû£ºgetmcc
-¹¦ÄÜ  £º»ñÈ¡sim¿¨µÄmcc
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºmcc£¬Èç¹û»¹Ã»ÓĞ¶ÁÈ¡³öÀ´£¬Ôò·µ»Ø""
-×¢Òâ£º¿ª»úlua½Å±¾ÔËĞĞÖ®ºó£¬»á·¢ËÍatÃüÁîÈ¥²éÑ¯imsi£¬ËùÒÔĞèÒªÒ»¶¨Ê±¼ä²ÅÄÜ»ñÈ¡µ½imsi¡£¿ª»úºóÁ¢¼´µ÷ÓÃ´Ë½Ó¿Ú£¬»ù±¾ÉÏ·µ»Ø""
+å‡½æ•°åï¼šurc
+åŠŸèƒ½  ï¼šæœ¬åŠŸèƒ½æ¨¡å—å†…â€œæ³¨å†Œçš„åº•å±‚coreé€šè¿‡è™šæ‹Ÿä¸²å£ä¸»åŠ¨ä¸ŠæŠ¥çš„é€šçŸ¥â€çš„å¤„ç†
+å‚æ•°  ï¼š
+dataï¼šé€šçŸ¥çš„å®Œæ•´å­—ç¬¦ä¸²ä¿¡æ¯
+prefixï¼šé€šçŸ¥çš„å‰ç¼€
+è¿”å›å€¼ï¼šæ— 
 ]]
-function getmcc()
-	return (imsi ~= nil and imsi ~= "") and string.sub(imsi,1,3) or ""
+local function urc(data, prefix)
+    --simå¡çŠ¶æ€é€šçŸ¥
+    if prefix == "+CPIN" then
+        status = false
+        --simå¡æ­£å¸¸
+        if data == "+CPIN: READY" then
+            status = true
+            ril.request("AT+CCID")
+            ril.request("AT+CIMI")
+            sys.publish("SIM_IND", "RDY")
+        --æœªæ£€æµ‹åˆ°simå¡
+        elseif data == "+CPIN: NOT INSERTED" then
+            sys.publish("SIM_IND", "NIST")
+        else
+            --simå¡pinå¼€å¯
+            if data == "+CPIN: SIM PIN" then
+                sys.publish("SIM_IND_SIM_PIN")
+            end
+            sys.publish("SIM_IND", "NORDY")
+        end
+    end
 end
 
---[[
-º¯ÊıÃû£ºgetmnc
-¹¦ÄÜ  £º»ñÈ¡sim¿¨µÄgetmnc
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºmnc£¬Èç¹û»¹Ã»ÓĞ¶ÁÈ¡³öÀ´£¬Ôò·µ»Ø""
-×¢Òâ£º¿ª»úlua½Å±¾ÔËĞĞÖ®ºó£¬»á·¢ËÍatÃüÁîÈ¥²éÑ¯imsi£¬ËùÒÔĞèÒªÒ»¶¨Ê±¼ä²ÅÄÜ»ñÈ¡µ½imsi¡£¿ª»úºóÁ¢¼´µ÷ÓÃ´Ë½Ó¿Ú£¬»ù±¾ÉÏ·µ»Ø""
-]]
-function getmnc()
-	return (imsi ~= nil and imsi ~= "") and string.sub(imsi,4,5) or ""
-end
-
---[[
-º¯ÊıÃû£ºgetstatus
-¹¦ÄÜ  £º»ñÈ¡sim¿¨µÄ×´Ì¬
-²ÎÊı  £ºÎŞ
-·µ»ØÖµ£ºtrue±íÊ¾sim¿¨Õı³££¬false»òÕßnil±íÊ¾Î´¼ì²âµ½¿¨»òÕß¿¨Òì³£
-×¢Òâ£º¿ª»úlua½Å±¾ÔËĞĞÖ®ºó£¬»á·¢ËÍatÃüÁîÈ¥²éÑ¯×´Ì¬£¬ËùÒÔĞèÒªÒ»¶¨Ê±¼ä²ÅÄÜ»ñÈ¡µ½×´Ì¬¡£¿ª»úºóÁ¢¼´µ÷ÓÃ´Ë½Ó¿Ú£¬»ù±¾ÉÏ·µ»Ønil
-]]
-function getstatus()
-	return status
-end
-
---[[
-º¯ÊıÃû£ºrsp
-¹¦ÄÜ  £º±¾¹¦ÄÜÄ£¿éÄÚ¡°Í¨¹ıĞéÄâ´®¿Ú·¢ËÍµ½µ×²ãcoreÈí¼şµÄATÃüÁî¡±µÄÓ¦´ğ´¦Àí
-²ÎÊı  £º
-		cmd£º´ËÓ¦´ğ¶ÔÓ¦µÄATÃüÁî
-		success£ºATÃüÁîÖ´ĞĞ½á¹û£¬true»òÕßfalse
-		response£ºATÃüÁîµÄÓ¦´ğÖĞµÄÖ´ĞĞ½á¹û×Ö·û´®
-		intermediate£ºATÃüÁîµÄÓ¦´ğÖĞµÄÖĞ¼äĞÅÏ¢
-·µ»ØÖµ£ºÎŞ
-]]
-local function rsp(cmd,success,response,intermediate)
-	if cmd == "AT+CCID" then
-		iccid = intermediate
-	elseif cmd == "AT+CIMI" then
-		imsi = intermediate
-		--²úÉúÒ»¸öÄÚ²¿ÏûÏ¢IMSI_READY£¬Í¨ÖªÒÑ¾­¶ÁÈ¡imsi
-		sys.dispatch("IMSI_READY")
-	end
-end
-
---[[
-º¯ÊıÃû£ºurc
-¹¦ÄÜ  £º±¾¹¦ÄÜÄ£¿éÄÚ¡°×¢²áµÄµ×²ãcoreÍ¨¹ıĞéÄâ´®¿ÚÖ÷¶¯ÉÏ±¨µÄÍ¨Öª¡±µÄ´¦Àí
-²ÎÊı  £º
-		data£ºÍ¨ÖªµÄÍêÕû×Ö·û´®ĞÅÏ¢
-		prefix£ºÍ¨ÖªµÄÇ°×º
-·µ»ØÖµ£ºÎŞ
-]]
-local function urc(data,prefix)
-	--sim¿¨×´Ì¬Í¨Öª
-	if prefix == "+CPIN" then
-		status = false
-		--sim¿¨Õı³£
-		if data == "+CPIN: READY" then
-			status = true
-			req("AT+CCID")
-			req("AT+CIMI")
-			sys.dispatch("SIM_IND","RDY")
-		--Î´¼ì²âµ½sim¿¨
-		elseif data == "+CPIN: NOT INSERTED" then
-			sys.dispatch("SIM_IND","NIST")
-		else
-			--sim¿¨pin¿ªÆô
-			if data == "+CPIN: SIM PIN" then
-				sys.dispatch("SIM_IND_SIM_PIN")	
-			end
-			sys.dispatch("SIM_IND","NORDY")
-		end
-	end
-end
-
---×¢²áAT+CCIDÃüÁîµÄÓ¦´ğ´¦Àíº¯Êı
-ril.regrsp("+CCID",rsp)
---×¢²áAT+CIMIÃüÁîµÄÓ¦´ğ´¦Àíº¯Êı
-ril.regrsp("+CIMI",rsp)
---×¢²á+CPINÍ¨ÖªµÄ´¦Àíº¯Êı
-ril.regurc("+CPIN",urc)
+--æ³¨å†ŒAT+CCIDå‘½ä»¤çš„åº”ç­”å¤„ç†å‡½æ•°
+ril.regRsp("+CCID", rsp)
+--æ³¨å†ŒAT+CIMIå‘½ä»¤çš„åº”ç­”å¤„ç†å‡½æ•°
+ril.regRsp("+CIMI", rsp)
+--æ³¨å†Œ+CPINé€šçŸ¥çš„å¤„ç†å‡½æ•°
+ril.regUrc("+CPIN", urc)
+--å…³é—­simå¡çš„STKåŠŸèƒ½ï¼Œæœ‰çš„simå¡STKåŠŸèƒ½å¼€æœºä¼šä¸æ–­çš„å‘é€çŸ­ä¿¡ï¼Œå½±å“æ•°æ®ä¸šåŠ¡çš„ç¨³å®šå·¥ä½œ
+ril.request("AT+STON=0")
