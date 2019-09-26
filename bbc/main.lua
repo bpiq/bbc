@@ -19,7 +19,7 @@ local did = 10001 -- 设备编号
 local token = "hellohelloballcat" -- 设备令牌
 local model = "com.ball.car" -- 设备类型
 
-function main()
+function start()
     local app = Application.new()
 
     app:pre_setup({
@@ -41,4 +41,9 @@ end
 
 function _main()
     sys.init(0)
+
+    start()
+
+    sys.run()
 end
+_main()
