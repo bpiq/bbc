@@ -2,7 +2,7 @@
 -- yueqiumao (u2nn@qq.com)
 
 PROJECT = "BBC"
-VERSION = "1.0.0"
+VERSION = "0.0.1"
 PRODUCT_KEY = "v32xEAKsGTIEQxtqgwCldp5aPlcnPs3K"
 
 require "sys"
@@ -19,7 +19,6 @@ require "status_led"
 local did = 10001 -- 设备编号
 local token = "hellohelloballcat" -- 设备令牌
 local model = "com.ball.car" -- 设备类型
-local version = "0.0.1"
 
 local function task_main()
     local app = Application.new()
@@ -29,7 +28,7 @@ local function task_main()
         did=did,
         token=token,
         model=model,
-        version=version
+        version=VERSION
     })
 
     -- 注册日志模块

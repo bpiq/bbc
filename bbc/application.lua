@@ -24,6 +24,8 @@ function Application:setup()
 
     for i,v in ipairs(self.components) do
         v:setup()
+
+        -- TODO 等待组件完成
     end
 end
 

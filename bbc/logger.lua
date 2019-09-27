@@ -21,6 +21,10 @@ function Logger:pre_setup()
     
 end
 
+function Logger:begin()
+    logger.info("日志组件启动")
+end
+
 function Logger:debug(...)
     log.debug(...)
 end
