@@ -58,14 +58,16 @@ function Component:call()
     if state == COMPONENT_STATE_CONSTRUCTION then
         self.component_state = bit.band(self.component_state, bit.bnot(COMPONENT_STATE_MASK))
         self.component_state = bit.bor(self.component_state, COMPONENT_STATE_SETUP)
-        self.setup()
+        self:setup()
     elseif state == COMPONENT_STATE_SETUP then
         self.component_state = bit.band(self.component_state, bit.bnot(COMPONENT_STATE_MASK))
         self.component_state = bit.bor(self.component_state, COMPONENT_STATE_LOOP)
-        self.loop()
+        self:loop()
     elseif state == COMPONENT_STATE_LOOP then
-        self.loop()
+        self:loop()
     elseif state == COMPONENT_STATE_FAILED then
+
+    else
 
     end
 end
@@ -79,7 +81,7 @@ end
 function Component:mark_failed()
     self.component_state = bit.band(self.component_state, bit.bnot(COMPONENT_STATE_MASK))
     self.component_state = bit.bor(self.component_state, COMPONENT_STATE_FAILED)
-    self.status_set_error()
+    self:status_set_error()
 end
 
 function Component:is_failed()
@@ -91,19 +93,21 @@ function Component:can_proceed()
 end
 
 function Component:status_has_warning()
-    return bit.band(self.component_state, STATUS_LED_WARNING)
+    return bit.band(self.component_state, STATUS_LED_WARNING) == STATUS_LED_WARNING
 end
 
 function Component:status_has_error()
-    return bit.band(self.component_state, STATUS_LED_ERROR)
+    return bit.band(self.component_state, STATUS_LED_ERROR) == STATUS_LED_ERROR
 end
 
 function Component:status_set_warning() 
-    self.component_state = bit.bor(self.component_state, STATUS_LED_WARNING) == STATUS_LED_WARNING
+    self.component_state = bit.bor(self.component_state, STATUS_LED_WARNING)
+    app.app_state = bit.bor(app.app_state, STATUS_LED_WARNING)
 end
 
 function Component:status_set_error()
-    self.component_state = bit.bor(self.component_state, STATUS_LED_ERROR) == STATUS_LED_ERROR
+    self.component_state = bit.bor(self.component_state, STATUS_LED_ERROR)
+    app.app_state = bit.bor(app.app_state, STATUS_LED_ERROR)
 end
 
 function Component:status_clear_warning()

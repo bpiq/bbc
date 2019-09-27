@@ -18,7 +18,7 @@ function StatusLed:pre_setup()
 end
 
 function StatusLed:setup()
-    logger.info("状态LED组件启动")
+    logger:info("状态LED组件启动")
 end
 
 function StatusLed:loop()

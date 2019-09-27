@@ -18,11 +18,11 @@ function Logger:get_setup_priority()
 end
 
 function Logger:pre_setup()
-    
+
 end
 
-function Logger:begin()
-    logger.info("日志组件启动")
+function Logger:setup()
+    logger:info("日志组件启动")
 end
 
 function Logger:debug(...)

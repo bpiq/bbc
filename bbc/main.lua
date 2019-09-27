@@ -21,9 +21,8 @@ local token = "hellohelloballcat" -- 设备令牌
 local model = "com.ball.car" -- 设备类型
 
 local function task_main()
+    -- 主app初始化
     local app = Application.new()
-
-    -- 基础配置
     app:pre_setup({
         did=did,
         token=token,

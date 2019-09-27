@@ -23,7 +23,7 @@ function Application:setup()
     table.sort(self.components, function(a, b) return a:get_setup_priority() < b:get_setup_priority() end)
 
     for i,v in ipairs(self.components) do
-        v:setup()
+        v:call()
 
         -- TODO 等待组件完成
     end
@@ -32,9 +32,8 @@ end
 -- 系统主循环
 function Application:loop()
     for i,v in ipairs(self.components) do
-        v:loop()
+        v:call()
     end
-    self.app_state = STATUS_LED_ERROR
 end
 
 function Application:shutdown()
