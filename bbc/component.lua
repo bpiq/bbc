@@ -12,12 +12,22 @@ SETUP_PRIORITY_AFTER_CONNECTION = 50 -- 连接云端成功阶段
 SETUP_PRIORITY_LATE = 60 -- 后续阶段
 
 -- 组件构造
-function Component:ctor(...)
+function Component:ctor()
+
+end
+
+-- 获取组件启动优先级
+function Component:get_setup_priority()
+
+end
+
+-- 设置组件启动优先级
+function Component:set_setup_priority(priority)
 
 end
 
 -- 组件启用
-function Component:setup(...)
+function Component:setup()
 
 end
 
@@ -26,20 +36,7 @@ function Component:loop()
 
 end
 
-function Component:get_setup_priority()
-
-end
-
-function Component:set_setup_priority(priority)
-
-end
-
 -- 组件关闭
 function Component:shutdown()
-
-end
-
--- 组件释放
-function Component:destry()
 
 end

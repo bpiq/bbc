@@ -13,6 +13,14 @@ function Logger:ctor()
     logger = self
 end
 
+function Logger:get_setup_priority()
+    return SETUP_PRIORITY_HARDWARE
+end
+
+function Logger:set_setup_priority()
+end
+
+
 function Logger:pre_setup()
     
 end
