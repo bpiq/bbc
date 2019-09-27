@@ -7,13 +7,14 @@ PRODUCT_KEY = "v32xEAKsGTIEQxtqgwCldp5aPlcnPs3K"
 
 require "sys"
 
+require "util"
 require "class"
 require "component"
 require "logger"
 require "event"
-require "util"
 require "network"
 require "application"
+require "status_led"
 
 local did = 10001 -- 设备编号
 local token = "hellohelloballcat" -- 设备令牌
@@ -33,14 +34,19 @@ local function task_main()
 
     -- 注册日志模块
     local logger = Logger.new()
-    logger.pre_setup()
+    logger:pre_setup()
     app:register_component(logger)
+
+    -- 注册led模块
+    local status_led = StatusLed.new()
+    status_led:pre_setup()
+    app:register_component(status_led)
 
     app:setup()
 
     while true do
         app:loop()
-        sys.wait(1)
+        sys.wait(16)
     end
 end
 

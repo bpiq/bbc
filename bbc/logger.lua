@@ -14,23 +14,11 @@ function Logger:ctor()
 end
 
 function Logger:get_setup_priority()
-    return SETUP_PRIORITY_HARDWARE
+    return SETUP_PRIORITY_HARDWARE-1
 end
-
-function Logger:set_setup_priority()
-end
-
 
 function Logger:pre_setup()
     
-end
-
-function Logger:setup()
-    self.super.setup(self)
-end
-
-function Logger:destroy()
-    self.super.destroy(self)
 end
 
 function Logger:debug(...)

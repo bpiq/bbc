@@ -8,6 +8,7 @@ app = nil
 function Application:ctor()
     app = self
     self.components = {}
+    self.app_state = 0
 end
 
 -- 系统预初始化
@@ -31,6 +32,7 @@ function Application:loop()
     for i,v in ipairs(self.components) do
         v:loop()
     end
+    self.app_state = STATUS_LED_ERROR
 end
 
 function Application:shutdown()
@@ -39,6 +41,10 @@ end
 
 function Application:reboot()
 
+end
+
+function Application:get_app_state()
+    return self.app_state
 end
 
 function Application:register_component(component)
