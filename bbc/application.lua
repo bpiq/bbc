@@ -31,9 +31,13 @@ end
 
 -- 系统主循环
 function Application:loop()
+    local new_app_state = 0
     for i,v in ipairs(self.components) do
         v:call()
+        new_app_state = bit.bor(new_app_state, v:get_component_state())
+        self.app_state = bit.bor(self.app_state, new_app_state)
     end
+    self.app_state = new_app_state
 end
 
 function Application:shutdown()

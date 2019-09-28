@@ -6,6 +6,8 @@ VERSION = "0.0.1"
 PRODUCT_KEY = "v32xEAKsGTIEQxtqgwCldp5aPlcnPs3K"
 
 require "sys"
+require "net"
+require "sim"
 
 require "util"
 require "class"
@@ -15,6 +17,7 @@ require "event"
 require "network"
 require "application"
 require "status_led"
+require "gprs"
 
 local did = 10001 -- 设备编号
 local token = "hellohelloballcat" -- 设备令牌
@@ -39,6 +42,10 @@ local function task_main()
     local status_led = StatusLed.new()
     status_led:pre_setup()
     app:register_component(status_led)
+
+    -- 注册gprs模块
+    local gprs = Gprs.new()
+    app:register_component(gprs)
 
     app:setup()
 

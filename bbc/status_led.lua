@@ -22,9 +22,9 @@ function StatusLed:setup()
 end
 
 function StatusLed:loop()
-    if app:get_app_state() == STATUS_LED_ERROR then
+    if bit.band(app:get_app_state(), STATUS_LED_ERROR) == STATUS_LED_ERROR then
         self.gpio_led(millis() % 250 < 150 and 1 or 0)
-    elseif app:get_app_state() == STATUS_LED_WARNING then
+    elseif bit.band(app:get_app_state(), STATUS_LED_WARNING) == STATUS_LED_WARNING then
         self.gpio_led(millis() % 1500 < 250 and 1 or 0)
     else
         self.gpio_led(0)
