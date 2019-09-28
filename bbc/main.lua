@@ -5,9 +5,16 @@ PROJECT = "BBC"
 VERSION = "0.0.1"
 PRODUCT_KEY = "v32xEAKsGTIEQxtqgwCldp5aPlcnPs3K"
 
+require "log"
 require "sys"
 require "net"
 require "sim"
+require "misc"
+require "sms"
+require "wdt"
+require "link"
+require "socket"
+require "httpv2"
 
 require "util"
 require "class"
@@ -18,6 +25,9 @@ require "network"
 require "application"
 require "status_led"
 require "gprs"
+require "watchcat"
+
+local TAG = "main"
 
 local did = 10001 -- 设备编号
 local token = "hellohelloballcat" -- 设备令牌
@@ -33,17 +43,21 @@ local function task_main()
         version=VERSION
     })
 
-    -- 注册日志模块
+    -- 注册日志组件
     local logger = Logger.new()
     logger:pre_setup()
     app:register_component(logger)
 
-    -- 注册led模块
+    -- 注册led组件
     local status_led = StatusLed.new()
     status_led:pre_setup()
     app:register_component(status_led)
 
-    -- 注册gprs模块
+    -- 注册看门猫组件
+    local watchcat = Watchcat.new()
+    app:register_component(watchcat)
+
+    -- 注册gprs组件
     local gprs = Gprs.new()
     app:register_component(gprs)
 

@@ -3,6 +3,8 @@
 
 StatusLed = class("StatusLed", Component)
 
+local TAG = "StatusLed"
+
 require "pins"
 
 function StatusLed:get_setup_priority()
@@ -18,7 +20,7 @@ function StatusLed:pre_setup()
 end
 
 function StatusLed:setup()
-    logger:info("状态LED组件启动")
+    logger:info(TAG, "状态LED组件启动")
 end
 
 function StatusLed:loop()

@@ -3,6 +3,8 @@
 
 Application = class("Application")
 
+local TAG = "Application"
+
 app = nil
 
 function Application:ctor()
@@ -18,15 +20,30 @@ end
 
 -- 系统启用
 function Application:setup()
-    logger:info(string.format("BBC v%s 启动", self.node_info.version))
+    logger:info(TAG, string.format("BBC v%s 启动", self.node_info.version))
 
     table.sort(self.components, function(a, b) return a:get_setup_priority() < b:get_setup_priority() end)
 
     for i,v in ipairs(self.components) do
         v:call()
-
-        -- TODO 等待组件完成
+        -- 组件尚未处理完毕，对已完毕的组件开启工作流程，直到当前组件完毕
+        if not v:can_proceed() then
+            -- TODO 对组件进行工作流程优先级排序
+            repeat
+                local new_app_state = STATUS_LED_WARNING
+                for ii = 1, i do
+                    local vv = self.components[ii];
+                    vv:call()
+                    new_app_state = bit.bor(new_app_state, vv:get_component_state())
+                    self.app_state = bit.bor(self.app_state, new_app_state)
+                end
+                self.app_state = new_app_state
+                sys.wait(16)
+            until v:can_proceed()
+        end
     end
+
+    -- TODO 对组件进行工作流程优先级排序
 end
 
 -- 系统主循环

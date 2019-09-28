@@ -6,6 +6,8 @@ Logger = class("Logger", Component)
 require "log"
 LOG_LEVEL = log.LOGLEVEL_TRACE
 
+local TAG = "logger"
+
 logger = nil
 
 function Logger:ctor()
@@ -22,7 +24,7 @@ function Logger:pre_setup()
 end
 
 function Logger:setup()
-    logger:info("日志组件启动")
+    logger:info(TAG, "日志组件启动")
 end
 
 function Logger:debug(...)
