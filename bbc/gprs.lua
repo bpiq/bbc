@@ -1,4 +1,4 @@
--- 管理gprs网络
+-- 管理gprs网络，保证上层socket能正常通讯
 -- yueqiumao (u2nn@qq.com)
 
 Gprs = class("Gprs", Component)

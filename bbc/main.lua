@@ -61,6 +61,10 @@ local function task_main()
     local gprs = Gprs.new()
     app:register_component(gprs)
 
+    -- 注册网络组件
+    local network = Network.new()
+    app:register_component(network)
+
     app:setup()
 
     while true do
